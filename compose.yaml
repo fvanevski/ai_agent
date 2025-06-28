@@ -1,0 +1,193 @@
+name: llm-serve
+services:
+  faster-whisper:
+    command:
+      - uvicorn
+      - api:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8003"
+      - --reload
+    container_name: faster-whisper
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities:
+                - gpu
+              driver: nvidia
+              count: -1
+    environment:
+      HUGGINGFACE_HUB_TOKEN: $HUGGINGFACE_HUB_TOKEN
+      LD_LIBRARY_PATH: /usr/local/cuda-12.8/lib64:/usr/local/cuda-12.8/lib64_8:/usr/lib/x86_64-linux-gnu:/usr/local/lib/python3.10/dist-packages/nvidia/cudnn/lib
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8003/health
+      timeout: 5s
+      interval: 30s
+      retries: 3
+    image: whisper-base:1.0
+    ipc: host
+    logging:
+      driver: journald
+      options:
+        tag: asr_tool
+    networks:
+      agent-network: null
+    ports:
+      - mode: ingress
+        target: 8003
+        published: "8003"
+        protocol: tcp
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: ./asr-api
+        target: /app
+        read_only: true
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /home/filip/.cache/huggingface
+        target: /root/.cache/huggingface
+        bind:
+          create_host_path: true
+  llama.cpp-embedding:
+    command:
+      - -m
+      - /root/.cache/huggingface/hub/models--mradermacher--bge-large-en-v1.5-i1-GGUF/bge-large-en-v1.5.i1-Q6_K.gguf
+      - --hf-repo
+      - mradermacher/bge-large-en-v1.5-i1-GGUF
+      - -c
+      - "512"
+      - --n-gpu-layers
+      - "30"
+      - -fa
+      - -a
+      - embed
+      - --port
+      - "8001"
+    container_name: llama.cpp-embedding
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities:
+                - gpu
+              driver: nvidia
+              count: -1
+    environment:
+      HUGGINGFACE_HUB_TOKEN: $HUGGINGFACE_HUB_TOKEN
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    logging:
+      driver: journald
+      options:
+        tag: ai_agent_embed
+    networks:
+      agent-network: null
+    ports:
+      - mode: ingress
+        target: 8001
+        published: "8001"
+        protocol: tcp
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /home/filip/.cache/huggingface
+        target: /root/.cache/huggingface
+        bind:
+          create_host_path: true
+  vllm-agent:
+    command:
+      - --model
+      - solidrust/Hermes-3-Llama-3.1-8B-AWQ
+      - --port
+      - "8002"
+      - --trust-remote-code
+      - --enable-prefix-caching
+      - --max_model_len
+      - 32K
+      - --enable-auto-tool-choice
+      - --tool-call-parser
+      - hermes
+      - --quantization
+      - awq_marlin
+      - --kv-cache-dtype
+      - fp8
+      - --dtype
+      - half
+      - --gpu_memory_utilization
+      - "0.75"
+      - --swap-space
+      - "8"
+    container_name: vllm-agent
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - capabilities:
+                - gpu
+              driver: nvidia
+              count: -1
+    environment:
+      HUGGINGFACE_HUB_TOKEN: $HUGGINGFACE_HUB_TOKEN
+      VLLM_SERVER_DEV_MODE: "1"
+    healthcheck:
+      test:
+        - CMD
+        - curl
+        - -f
+        - http://localhost:8002/health
+      timeout: 5s
+      interval: 30s
+      retries: 3
+    image: vllm/vllm-openai:latest
+    ipc: host
+    logging:
+      driver: journald
+      options:
+        tag: ai_agent_chat
+    networks:
+      agent-network: null
+    ports:
+      - mode: ingress
+        target: 8002
+        published: "8002"
+        protocol: tcp
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - type: bind
+        source: /workspace/models
+        target: /models
+        bind:
+          create_host_path: true
+      - type: bind
+        source: /home/filip/.cache/huggingface
+        target: /root/.cache/huggingface
+        bind:
+          create_host_path: true
+      - type: volume
+        source: vllm_cache
+        target: /root/.cache/vllm
+        volume: {}
+networks:
+  agent-network:
+    name: agent-network
+    driver: bridge
+volumes:
+  vllm_cache:
+    name: vllm_cache
+x-gpu:
+  deploy:
+    resources:
+      reservations:
+        devices:
+          - capabilities:
+              - gpu
+            driver: nvidia

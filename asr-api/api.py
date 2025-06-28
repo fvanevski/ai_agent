@@ -205,7 +205,13 @@ def _run_asr(path: Path, output: str) -> Dict[str, Any]:
 # ---------------------------------------------------------------------------
 # FastAPI service
 # ---------------------------------------------------------------------------
+
 app = FastAPI(title="Whisper‑ASR", version="1.0")
+
+# Simple health check endpoint
+@app.get("/health")
+async def health():
+    return {"status": "healthy"}
 
 
 class URLReq(BaseModel):
