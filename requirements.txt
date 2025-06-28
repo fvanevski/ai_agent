@@ -1,0 +1,9 @@
+fastapi
+pydantic
+redis
+types-redis
+uvicorn
+langchain
+langgraph
+langchain-openai
+llama-index

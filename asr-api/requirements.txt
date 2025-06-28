@@ -1,0 +1,8 @@
+# requirements.txt  – minimal, GPU-ready
+faster-whisper
+pyannote.audio
+soundfile
+fastapi
+uvicorn[standard]
+python-multipart
+yt_dlp
