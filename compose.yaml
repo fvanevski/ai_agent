@@ -105,11 +105,13 @@ services:
   vllm-agent:
     command:
       - --model
-      - solidrust/Hermes-3-Llama-3.1-8B-AWQ
+      - /models/Josiefied-Qwen2.5-7B-Instruct-AWQ-AutoAWQ
       - --port
       - "8002"
+      - --served-model-name
+      - chat
+      - --enable-sleep-mode
       - --trust-remote-code
-      - --enable-prefix-caching
       - --max_model_len
       - 32K
       - --enable-auto-tool-choice
@@ -117,12 +119,10 @@ services:
       - hermes
       - --quantization
       - awq_marlin
-      - --kv-cache-dtype
-      - fp8
       - --dtype
       - half
       - --gpu_memory_utilization
-      - "0.75"
+      - "0.7"
       - --swap-space
       - "8"
     container_name: vllm-agent
@@ -137,6 +137,7 @@ services:
     environment:
       HUGGINGFACE_HUB_TOKEN: $HUGGINGFACE_HUB_TOKEN
       VLLM_SERVER_DEV_MODE: "1"
+      NCCL_CUMEM_ENABLE: "1"
     healthcheck:
       test:
         - CMD

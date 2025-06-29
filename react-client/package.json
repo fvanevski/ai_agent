@@ -19,17 +19,7 @@
     "test": "react-scripts test",
     "eject": "react-scripts eject"
   },
-  "proxy": {
-    "/v1": {
-      "target": "http://localhost:9000"
-    },
-    "/mcpo": {
-      "target": "http://localhost:9001",
-      "pathRewrite": {
-        "^/mcpo": ""
-      }
-    }
-  },
+  "proxy": "http://localhost:9000",
   "eslintConfig": {
     "extends": [
       "react-app",
