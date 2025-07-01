@@ -2,3 +2,6 @@ fastapi
 uvicorn[standard]
 httpx
 requests
+python-dotenv
+pytest
+requests-mock
