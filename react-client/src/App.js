@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
+import { evaluate } from './evaluation';
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -16,7 +17,13 @@ function App() {
   const [newServerUrl, setNewServerUrl] = useState('');
   const [testResults, setTestResults] = useState({});
   const [testing, setTesting] = useState({});
+  const [evaluationResults, setEvaluationResults] = useState(null);
   const fileInputRef = useRef(null);
+
+  const runEvaluation = async () => {
+    const results = await evaluate(sendMessage);
+    setEvaluationResults(results);
+  };
 
   // Fetch tools from all configured MCP servers
   useEffect(() => {
@@ -177,12 +184,55 @@ function App() {
       apiContent = `${fileContext}\n\n---\n\nQUESTION:\n${trimmedInput}`;
     }
 
-    // Use a neutral system prompt
     const systemPrompt = {
       role: 'system',
-      content: 'You are a helpful assistant.'
+      content: "You are an expert AI assistant with the ability to execute tools in parallel. When a user's request involves multiple independent tasks, you should call the necessary tools in a single turn to maximize efficiency. For example, if asked to 'get the weather in New York and London', you should respond with two parallel calls to the `get_weather` tool. Your goal is to identify opportunities for parallel execution and use them whenever possible to provide a faster and more efficient response."
     };
-    const apiMessages = [systemPrompt, ...messages.map(msg => ({
+    const fewShotExamples = [
+      {
+        "role": "user",
+        "content": "What's the weather in New York and London?"
+      },
+      {
+        "role": "assistant",
+        "content": JSON.stringify([
+          {
+            "tool_name": "get_weather",
+            "parameters": {
+              "city": "New York"
+            }
+          },
+          {
+            "tool_name": "get_weather",
+            "parameters": {
+              "city": "London"
+            }
+          }
+        ], null, 2)
+      },
+      {
+        "role": "user",
+        "content": "Summarize the following articles: [URL1] and [URL2]"
+      },
+      {
+        "role": "assistant",
+        "content": JSON.stringify([
+          {
+            "tool_name": "summarize_article",
+            "parameters": {
+              "url": "[URL1]"
+            }
+          },
+          {
+            "tool_name": "summarize_article",
+            "parameters": {
+              "url": "[URL2]"
+            }
+          }
+        ], null, 2)
+      }
+    ];
+    const apiMessages = [systemPrompt, ...fewShotExamples, ...messages.map(msg => ({
       role: msg.role,
       content: msg.content,
       tool_calls: msg.tool_calls
@@ -318,6 +368,7 @@ function App() {
         <h1>Local LLM Chat</h1>
         <button onClick={startNewChat} className="new-chat-btn">New Chat</button>
         <button onClick={openSettings} className="settings-btn" style={{ marginLeft: 8 }}>Settings</button>
+        <button onClick={runEvaluation} className="evaluation-btn" style={{ marginLeft: 8 }}>Run Evaluation</button>
       </header>
       <div className="chat-container">
         <div className="message-list">
@@ -337,6 +388,12 @@ function App() {
             )
           })}
         </div>
+        {evaluationResults && (
+          <div className="evaluation-results">
+            <h2>Evaluation Results</h2>
+            <pre>{JSON.stringify(evaluationResults, null, 2)}</pre>
+          </div>
+        )}
         <div className="input-area">
           {files.length > 0 && (
             <div className="file-list">

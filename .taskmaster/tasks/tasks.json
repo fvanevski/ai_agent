@@ -168,14 +168,14 @@
         "dependencies": [
           7
         ],
-        "status": "deferred",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Implement custom `parallel_tool_node` function",
             "description": "",
             "details": "",
-            "status": "in-progress",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 8
           },
@@ -184,7 +184,7 @@
             "title": "Replace `tool_node` with `parallel_tool_node` in graph",
             "description": "",
             "details": "",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 8
           },
@@ -193,7 +193,7 @@
             "title": "Develop unit test for `parallel_tool_node`",
             "description": "",
             "details": "",
-            "status": "in-progress",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 8
           },
@@ -202,7 +202,7 @@
             "title": "Write performance test for parallel execution",
             "description": "",
             "details": "",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 8
           }
@@ -218,14 +218,14 @@
         "dependencies": [
           8
         ],
-        "status": "pending",
+        "status": "done",
         "subtasks": [
           {
             "id": 1,
             "title": "Draft and iterate on the new system prompt",
             "description": "",
             "details": "",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 9
           },
@@ -234,7 +234,7 @@
             "title": "Create a set of high-quality few-shot examples",
             "description": "",
             "details": "",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 9
           },
@@ -243,7 +243,7 @@
             "title": "Develop an evaluation suite for user queries",
             "description": "",
             "details": "",
-            "status": "pending",
+            "status": "done",
             "dependencies": [],
             "parentTaskId": 9
           }
@@ -319,7 +319,7 @@
     ],
     "metadata": {
       "created": "2025-06-28T22:47:14.740Z",
-      "updated": "2025-06-29T06:08:26.102Z",
+      "updated": "2025-07-02T00:47:45.812Z",
       "description": "Tasks for master context"
     }
   }

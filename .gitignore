@@ -2,8 +2,8 @@
 .env
 __pycache__/
 node_modules
-tmp
-models
+tmp/
+models/
 
 # Logs
 logs
@@ -27,5 +27,10 @@ node_modules/
 .DS_Store
 
 # Task files
-# tasks.json
-# tasks/ 
+.taskmaster/
+tasks.json
+tasks/ 
+
+# Docker files
+compose.yaml
+Dockerfile
