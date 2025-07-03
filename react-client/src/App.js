@@ -7,135 +7,81 @@ function App() {
   const [messages, setMessages] = useState([]);
   const [input, setInput] = useState('');
   const [files, setFiles] = useState([]);
-  const [tools, setTools] = useState([]);
-  const [showSettings, setShowSettings] = useState(false);
-  const [mcpoServers, setMcpoServers] = useState(() => {
-    // Load from localStorage or default to localhost
-    const saved = localStorage.getItem('mcpoServers');
-    return saved ? JSON.parse(saved) : ['http://localhost:9002'];
+  const [tools, setTools] = useState({}); // Changed to an object to group by type
+  const [enabledTools, setEnabledTools] = useState(() => {
+    // Load from localStorage
+    const saved = localStorage.getItem('enabledTools');
+    return saved ? JSON.parse(saved) : {};
   });
-  const [newServerUrl, setNewServerUrl] = useState('');
-  const [testResults, setTestResults] = useState({});
-  const [testing, setTesting] = useState({});
+  const [showSettings, setShowSettings] = useState(false);
   const [evaluationResults, setEvaluationResults] = useState(null);
   const fileInputRef = useRef(null);
+  const [expandedServers, setExpandedServers] = useState({});
+  const [expandedMessages, setExpandedMessages] = useState({});
 
   const runEvaluation = async () => {
     const results = await evaluate(sendMessage);
     setEvaluationResults(results);
   };
 
-  // Fetch tools from all configured MCP servers
+  // Fetch tools from the tools-api service
   useEffect(() => {
-    const fetchAllTools = async () => {
-      let allTools = [];
-      let anyError = false;
-      for (const serverUrl of mcpoServers) {
-        try {
-          const response = await axios.get(`${serverUrl.replace(/\/$/, '')}/openapi.json`);
-          const openapiSchema = response.data;
-          // Attach serverUrl to each tool
-          const processedTools = processOpenAPISchema(openapiSchema).map(tool => ({ ...tool, serverUrl }));
-          allTools = allTools.concat(processedTools);
-        } catch (error) {
-          anyError = true;
-          console.error(`Error fetching tools from ${serverUrl}:`, error);
+    const fetchTools = async () => {
+      try {
+        const response = await axios.get('http://localhost:9000/get_tools');
+        const fetchedTools = response.data || { langgraph: [], mcpo: [] };
+        setTools(fetchedTools);
+
+        const savedEnabled = JSON.parse(localStorage.getItem('enabledTools'));
+        if (!savedEnabled) {
+          // Initialize enabled state if nothing is saved
+          const initialEnabled = {};
+          fetchedTools.langgraph.forEach(tool => {
+            initialEnabled[tool.name] = true; // LangGraph tools are toggled individually
+          });
+          fetchedTools.mcpo.forEach(server => {
+            initialEnabled[server.name] = true; // MCPO servers are toggled as a group
+          });
+          setEnabledTools(initialEnabled);
+          localStorage.setItem('enabledTools', JSON.stringify(initialEnabled));
+        } else {
+          // Use saved settings
+          setEnabledTools(savedEnabled);
         }
-      }
-      // Deduplicate tools by function name
-      const uniqueTools = [];
-      const seen = new Set();
-      for (const tool of allTools) {
-        if (tool.function && !seen.has(tool.function.name)) {
-          uniqueTools.push(tool);
-          seen.add(tool.function.name);
-        }
-      }
-      setTools(uniqueTools);
-      if (anyError && uniqueTools.length === 0) {
-        setMessages([{ text: 'Error: Could not load tools from any MCP server. Please check your settings.', sender: 'bot' }]);
+
+      } catch (error) {
+        console.error('Error fetching tools:', error);
+        setMessages([{ text: 'Error: Could not load tools from the tools-api.', sender: 'bot' }]);
       }
     };
-    fetchAllTools();
-  }, [mcpoServers]);
+    fetchTools();
+  }, []);
+
   // Settings modal logic
   const openSettings = () => setShowSettings(true);
   const closeSettings = () => setShowSettings(false);
 
-  const handleAddServer = () => {
-    const url = newServerUrl.trim();
-    if (!url || mcpoServers.includes(url)) return;
-    const updated = [...mcpoServers, url];
-    setMcpoServers(updated);
-    localStorage.setItem('mcpoServers', JSON.stringify(updated));
-    setNewServerUrl('');
+  const handleToggleTool = (toolName) => {
+    const updatedEnabled = { ...enabledTools, [toolName]: !enabledTools[toolName] };
+    setEnabledTools(updatedEnabled);
+    localStorage.setItem('enabledTools', JSON.stringify(updatedEnabled));
   };
 
-  const handleRemoveServer = (url) => {
-    const updated = mcpoServers.filter(u => u !== url);
-    setMcpoServers(updated);
-    localStorage.setItem('mcpoServers', JSON.stringify(updated));
-    setTestResults(prev => {
-      const copy = { ...prev };
-      delete copy[url];
-      return copy;
-    });
+  const handleToggleServer = (serverName) => {
+    const updatedEnabled = { ...enabledTools, [serverName]: !enabledTools[serverName] };
+    setEnabledTools(updatedEnabled);
+    localStorage.setItem('enabledTools', JSON.stringify(updatedEnabled));
   };
 
-  const handleTestServer = async (url) => {
-    setTesting(prev => ({ ...prev, [url]: true }));
-    try {
-      const response = await axios.get(`${url.replace(/\/$/, '')}/openapi.json`, { timeout: 4000 });
-      if (response.data && response.data.openapi) {
-        setTestResults(prev => ({ ...prev, [url]: 'success' }));
-      } else {
-        setTestResults(prev => ({ ...prev, [url]: 'invalid' }));
-      }
-    } catch (e) {
-      setTestResults(prev => ({ ...prev, [url]: 'fail' }));
-    }
-    setTesting(prev => ({ ...prev, [url]: false }));
+  const handleToggleServerExpansion = (serverName) => {
+    setExpandedServers(prev => ({ ...prev, [serverName]: !prev[serverName] }));
   };
 
-  const processOpenAPISchema = (schema) => {
-    const processed = [];
-    if (!schema || !schema.paths) return processed;
-
-    for (const path in schema.paths) {
-      for (const method in schema.paths[path]) {
-        if (method.toLowerCase() === 'post') {
-          const toolInfo = schema.paths[path][method];
-          const functionName = toolInfo.operationId.replace(/_post$/, '').replace(/_/g, '-');
-          const description = toolInfo.description || toolInfo.summary;
-          const requestBody = toolInfo.requestBody;
-          let parameters = { type: 'object', properties: {}, required: [] };
-
-          if (requestBody && requestBody.content && requestBody.content['application/json']) {
-            const schemaRef = requestBody.content['application/json'].schema['$ref'];
-            if (schemaRef) {
-              const schemaName = schemaRef.split('/').pop();
-              const componentSchema = schema.components.schemas[schemaName];
-              if (componentSchema) {
-                parameters.properties = componentSchema.properties;
-                parameters.required = componentSchema.required || [];
-              }
-            }
-          }
-          // Store the OpenAPI path for this tool
-          processed.push({
-            type: 'function',
-            function: {
-              name: functionName,
-              description: description,
-              parameters: parameters,
-            },
-            openapiPath: path,
-          });
-        }
-      }
-    }
-    return processed;
+  const toggleMessageExpansion = (index) => {
+    setExpandedMessages(prev => ({ ...prev, [index]: !prev[index] }));
   };
+
+  
 
   const handleFileChange = (event) => {
     const selectedFiles = Array.from(event.target.files);
@@ -184,169 +130,24 @@ function App() {
       apiContent = `${fileContext}\n\n---\n\nQUESTION:\n${trimmedInput}`;
     }
 
-    const systemPrompt = {
-      role: 'system',
-      content: "You are an expert AI assistant with the ability to execute tools in parallel. When a user's request involves multiple independent tasks, you should call the necessary tools in a single turn to maximize efficiency. For example, if asked to 'get the weather in New York and London', you should respond with two parallel calls to the `get_weather` tool. Your goal is to identify opportunities for parallel execution and use them whenever possible to provide a faster and more efficient response."
-    };
-    const fewShotExamples = [
-      {
-        "role": "user",
-        "content": "What's the weather in New York and London?"
-      },
-      {
-        "role": "assistant",
-        "content": JSON.stringify([
-          {
-            "tool_name": "get_weather",
-            "parameters": {
-              "city": "New York"
-            }
-          },
-          {
-            "tool_name": "get_weather",
-            "parameters": {
-              "city": "London"
-            }
-          }
-        ], null, 2)
-      },
-      {
-        "role": "user",
-        "content": "Summarize the following articles: [URL1] and [URL2]"
-      },
-      {
-        "role": "assistant",
-        "content": JSON.stringify([
-          {
-            "tool_name": "summarize_article",
-            "parameters": {
-              "url": "[URL1]"
-            }
-          },
-          {
-            "tool_name": "summarize_article",
-            "parameters": {
-              "url": "[URL2]"
-            }
-          }
-        ], null, 2)
-      }
-    ];
-    const apiMessages = [systemPrompt, ...fewShotExamples, ...messages.map(msg => ({
-      role: msg.role,
-      content: msg.content,
-      tool_calls: msg.tool_calls
-    })), { role: 'user', content: apiContent }];
-
     setInput('');
     setFiles([]);
 
     try {
-      let payload;
-      if (tools && tools.length > 0) {
-        payload = {
-          model: 'chat',
-          messages: apiMessages,
-          temperature: 0.7,
-          tools: tools.map(({ serverUrl, ...rest }) => rest),
-          tool_choice: 'auto',
-        };
-      } else {
-        payload = {
-          model: 'chat',
-          messages: apiMessages,
-          temperature: 0.7,
-        };
-      }
+      const payload = {
+        messages: [...messages, { role: 'user', content: apiContent }],
+      };
 
-      console.log('Sending payload to http://localhost:8002/v1/chat/completions:', payload);
+      console.log('Sending payload to http://localhost:8000/chat:', payload);
 
-      let response = await axios.post('http://localhost:8002/v1/chat/completions', payload);
+      const response = await axios.post('http://localhost:8000/chat', payload);
 
-      let botMessage = response.data.choices[0].message;
+      const botMessage = { role: 'assistant', content: response.data.response };
       setMessages(prevMessages => [...prevMessages, botMessage]);
 
-      if (botMessage.tool_calls && botMessage.tool_calls.length > 0) {
-        const toolPromises = botMessage.tool_calls.map(async (toolCall) => {
-          const toolName = toolCall.function.name;
-          const toolArgs = JSON.parse(toolCall.function.arguments);
-          // Find the tool definition and use its openapiPath
-          const toolDef = tools.find(t => t.function && t.function.name === toolName);
-          const serverUrl = toolDef && toolDef.serverUrl ? toolDef.serverUrl.replace(/\/$/, '') : '/mcpo';
-          const openapiPath = toolDef && toolDef.openapiPath ? toolDef.openapiPath : `/${toolName}`;
-          // Try both with and without trailing slash
-          const endpoints = [openapiPath, openapiPath.endsWith('/') ? openapiPath : openapiPath + '/'];
-          let lastError = null;
-          for (const endpoint of endpoints) {
-            try {
-              console.log('Calling MCP tool:', {
-                url: `${serverUrl}${endpoint}`,
-                args: toolArgs,
-                headers: { 'Content-Type': 'application/json' }
-              });
-              const toolResponse = await axios.post(`${serverUrl}${endpoint}`, toolArgs, {
-                headers: { 'Content-Type': 'application/json' }
-              });
-              return {
-                tool_call_id: toolCall.id,
-                role: 'tool',
-                name: toolName,
-                content: JSON.stringify(toolResponse.data, null, 2),
-              };
-            } catch (toolError) {
-              lastError = toolError;
-              // If not last endpoint, try next
-            }
-          }
-          // If both fail, log and return error
-          console.error('All MCP tool endpoint attempts failed:', {
-            endpoints: endpoints.map(e => `${serverUrl}${e}`),
-            args: toolArgs,
-            error: lastError
-          });
-          return {
-            tool_call_id: toolCall.id,
-            role: 'tool',
-            name: toolName,
-            content: `Error executing tool: ${lastError && lastError.message ? lastError.message : lastError}`,
-          };
-        });
-
-        const toolResults = await Promise.all(toolPromises);
-        setMessages(prevMessages => [...prevMessages, ...toolResults]);
-
-        // vLLM expects tool results as an array of objects with name, tool_call_id, role, content
-        const messagesWithToolResults = [...apiMessages, botMessage, ...toolResults];
-
-        let payload2;
-        if (tools && tools.length > 0) {
-          payload2 = {
-            model: 'chat',
-            messages: messagesWithToolResults,
-            temperature: 0.7,
-            tools: tools.map(({ serverUrl, ...rest }) => rest),
-            tool_choice: 'auto',
-          };
-        } else {
-          payload2 = {
-            model: 'chat',
-            messages: messagesWithToolResults,
-            temperature: 0.7,
-          };
-        }
-
-        try {
-          response = await axios.post('http://localhost:8002/v1/chat/completions', payload2);
-          let finalBotMessage = response.data.choices[0].message;
-          setMessages(prevMessages => [...prevMessages, finalBotMessage]);
-        } catch (error) {
-          console.error('Error during second LLM call:', error);
-          setMessages(prevMessages => [...prevMessages, { role: 'assistant', content: 'Error during second LLM call.' }]);
-        }
-      }
     } catch (error) {
-      console.error('Error communicating with the LLM:', error);
-      let errorMsg = 'Error: Could not connect to the LLM.';
+      console.error('Error communicating with the orchestrator:', error);
+      let errorMsg = 'Error: Could not connect to the orchestrator.';
       if (error.response && error.response.data) {
         if (typeof error.response.data === 'string') {
           errorMsg += `\n${error.response.data}`;
@@ -381,9 +182,25 @@ function App() {
                 </div>
               )
             }
+            
+            const thinkMatch = msg.content.match(/<think>(.*?)<\/think>/s);
+            const thinkContent = thinkMatch ? thinkMatch[1].trim() : null;
+            const visibleContent = msg.content.replace(/<think>.*?<\/think>/s, '').trim();
+
             return (
               <div key={index} className={`message ${msg.role}`}>
-                <pre style={{ fontFamily: 'inherit', margin: 0, whiteSpace: 'pre-wrap' }}>{msg.content}</pre>
+                {thinkContent && (
+                  <div className="thought-bubble">
+                    <div className="thought-header" onClick={() => toggleMessageExpansion(index)}>
+                      <span className={`arrow ${expandedMessages[index] ? 'down' : 'right'}`}></span>
+                      Thinking...
+                    </div>
+                    {expandedMessages[index] && (
+                      <pre className="thought-content">{thinkContent}</pre>
+                    )}
+                  </div>
+                )}
+                <pre style={{ fontFamily: 'inherit', margin: 0, whiteSpace: 'pre-wrap' }}>{visibleContent}</pre>
               </div>
             )
           })}
@@ -428,34 +245,70 @@ function App() {
 
       {/* Settings Modal */}
       {showSettings && (
-        <div className="modal-overlay" style={{ position: 'fixed', top:0, left:0, right:0, bottom:0, background: 'rgba(0,0,0,0.3)', zIndex: 1000 }}>
-          <div className="modal" style={{ background: '#fff', padding: 24, borderRadius: 8, maxWidth: 480, margin: '60px auto', position: 'relative' }}>
-            <h2>MCP Server Settings</h2>
-            <div style={{ marginBottom: 16 }}>
-              <input
-                type="text"
-                value={newServerUrl}
-                onChange={e => setNewServerUrl(e.target.value)}
-                placeholder="Add MCP server URL (e.g. http://localhost:9002)"
-                style={{ width: '70%' }}
-              />
-              <button onClick={handleAddServer} style={{ marginLeft: 8 }}>Add</button>
+        <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1000 }}>
+          <div className="modal">
+            <div className="modal-content">
+              <h2>Tool Settings</h2>
+              
+              {tools.langgraph && tools.langgraph.length > 0 && (
+                <div>
+                  <h3>LangGraph Tools</h3>
+                  <ul style={{ listStyle: 'none', padding: 0 }}>
+                    {tools.langgraph.map(tool => (
+                      <li key={tool.name} style={{ marginBottom: 8, display: 'flex', alignItems: 'center' }}>
+                        <span style={{ flex: 1 }}>
+                          <strong>{tool.name}</strong>: {tool.description}
+                        </span>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={enabledTools[tool.name] || false}
+                            onChange={() => handleToggleTool(tool.name)}
+                          />
+                          <span className="slider round"></span>
+                        </label>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+
+              {tools.mcpo && tools.mcpo.length > 0 && (
+                <div>
+                  <h3>MCPO Servers</h3>
+                  {tools.mcpo.map(server => (
+                    <div key={server.name} className="server-section" style={{ marginBottom: 16, border: '1px solid #ccc', padding: 10, borderRadius: 5 }}>
+                      <h4 onClick={() => handleToggleServerExpansion(server.name)}>
+                        <span className={`arrow ${expandedServers[server.name] ? 'down' : 'right'}`}></span>
+                        {server.name}
+                        <div style={{flex: 1}}></div>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={enabledTools[server.name] || false}
+                            onChange={() => handleToggleServer(server.name)}
+                            onClick={(e) => e.stopPropagation()} // Prevent expansion when toggling
+                          />
+                          <span className="slider round"></span>
+                        </label>
+                      </h4>
+                      {expandedServers[server.name] && enabledTools[server.name] && (
+                        <ul style={{ listStyle: 'none', padding: 0, marginLeft: 40 }}>
+                          {server.tools.map(tool => (
+                            <li key={tool.name} style={{ marginBottom: 8 }}>
+                              <strong>{tool.name}</strong>: {tool.description}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-            <ul style={{ listStyle: 'none', padding: 0 }}>
-              {mcpoServers.map((url, idx) => (
-                <li key={url} style={{ marginBottom: 8, display: 'flex', alignItems: 'center' }}>
-                  <span style={{ flex: 1 }}>{url}</span>
-                  <button onClick={() => handleTestServer(url)} disabled={testing[url]} style={{ marginRight: 8 }}>
-                    {testing[url] ? 'Testing...' : 'Test'}
-                  </button>
-                  {testResults[url] === 'success' && <span style={{ color: 'green', marginRight: 8 }}>✓</span>}
-                  {testResults[url] === 'fail' && <span style={{ color: 'red', marginRight: 8 }}>✗</span>}
-                  {testResults[url] === 'invalid' && <span style={{ color: 'orange', marginRight: 8 }}>Invalid</span>}
-                  <button onClick={() => handleRemoveServer(url)} style={{ color: 'red' }}>Remove</button>
-                </li>
-              ))}
-            </ul>
-            <button onClick={closeSettings} style={{ marginTop: 16 }}>Close</button>
+            <div className="modal-footer">
+              <button onClick={closeSettings}>Close</button>
+            </div>
           </div>
         </div>
       )}

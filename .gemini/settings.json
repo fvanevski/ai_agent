@@ -12,10 +12,6 @@
       "command": "npx",
       "args": ["mcp-remote", "https://hf.co/mcp", "--header", "Authorization: Bearer $HF_TOKEN"]
     },
-    "deepwiki": {
-      "command": "npx",
-      "args": ["mcp-remote", "https://mcp.deepwiki.com/mcp"]
-    },
     "markitdown": {
       "command": "uvx",
       "args": ["markitdown-mcp"]
@@ -24,14 +20,7 @@
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-sequential-thinking"]
     },
-    "taskmaster-ai": {
-      "command": "npx",
-      "args": ["-y", "--package=task-master-ai", "task-master-ai"],
-      "env": {
-        "GOOGLE_API_KEY": "AIzaSyAzbFNNGq641mIUSv4V8GMVj0dPxH87pkM"
-      }
-    },
-    "memory": {
+   "memory": {
       "command": "npx",
       "args": ["-y", "@modelcontextprotocol/server-memory"],
       "env": {

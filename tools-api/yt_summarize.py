@@ -1,7 +1,7 @@
 """run_agent.py – LangChain orchestration client with HF‑style chat roles
 =====================================================================
 This client:
-1. Sends a URL or local file to Whisper via the GPU‑aware proxy (port 9000).
+1. Sends a URL or local file to Whisper via the GPU‑aware proxy (port 8000).
 2. Receives diarised, speaker‑labelled **plain‑text** (`output=text`).
 3. Feeds that transcript to an LLM served behind the same proxy **using the
    HuggingFace llama‑3 chat template contraints** (conversation must begin with
@@ -38,9 +38,8 @@ LOGGER = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # REST helpers – auto‑route to the correct Whisper endpoint via the proxy
 # ---------------------------------------------------------------------------
-PROXY_BASE = os.getenv("PROXY_BASE_URL", "http://localhost:9000")
-TRANSCRIBE_ENDPOINT     = f"{PROXY_BASE}/transcribe"
-TRANSCRIBE_URL_ENDPOINT = f"{PROXY_BASE}/transcribe_url"
+TRANSCRIBE_ENDPOINT     = f"http://localhost:8003/transcribe"
+TRANSCRIBE_URL_ENDPOINT = f"http://localhost:8003/transcribe_url"
 
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
@@ -176,7 +175,7 @@ PROMPT = ChatPromptTemplate.from_messages([
 
 LLM = ChatOpenAI(
     model="chat",                     # served by vLLM
-    openai_api_base=f"{PROXY_BASE}/v1",
+    openai_api_base=f"http://localhost:8002/v1",
     openai_api_key="not-needed",
     temperature=0.2,
 )
@@ -193,7 +192,7 @@ def run_critical_summary(source: str) -> str:
     LOGGER.info("Starting critical summary for %s", source)
     # Wake up the LLM agent before starting transcription
     try:
-        wakeup_url = f"{PROXY_BASE}/wake_up"
+        wakeup_url = f"http://localhost:8002/wake_up"
         resp = requests.post(wakeup_url, timeout=10)
         if resp.ok:
             LOGGER.info("Sent wake_up to vllm-agent: %s", resp.json())

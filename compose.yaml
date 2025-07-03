@@ -3,7 +3,7 @@ services:
   faster-whisper:
     command:
       - uvicorn
-      - api:app
+      - asr-api:app
       - --host
       - 0.0.0.0
       - --port
@@ -105,7 +105,7 @@ services:
   vllm-agent:
     command:
       - --model
-      - /models/Josiefied-Qwen3-8B-abliterated-v1-awq-mix128
+      - /models/Qwen3-8B-64k-Context-2X-Josiefied-Uncensored-AWQ
       - --port
       - "8002"
       - --served-model-name
