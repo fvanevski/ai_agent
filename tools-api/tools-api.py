@@ -9,7 +9,7 @@
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from yt_summarize import run_critical_summary
+from yt_tools import summarize_url, transcribe_url
 import yaml
 import os
 import requests
@@ -34,9 +34,6 @@ app.add_middleware(
 
 # --- Pydantic Models ---
 
-class SummarizeRequest(BaseModel):
-    source: str
-
 class RunToolRequest(BaseModel):
     tool_name: str
     args: Dict[str, Any]
@@ -46,11 +43,22 @@ class RunToolRequest(BaseModel):
 TOOL_CACHE: Dict[str, Dict[str, Any]] = {}
 
 def get_langgraph_tools() -> List[Dict[str, Any]]:
-    """Loads tools defined in tools.yaml."""
+    """Loads tools defined in tools.yaml and structures them by module."""
     try:
         with open("tools.yaml", "r") as f:
             tools_data = yaml.safe_load(f)
-            return tools_data.get("Tools", [])
+            # Restructure the data to match the desired format
+            langgraph_tools = []
+            for module_name, tools in tools_data.get("LangGraph-Tools", {}).items():
+                module_tools = []
+                for tool in tools:
+                    tool['meta'] = {'type': 'langgraph', 'module': module_name}
+                    module_tools.append(tool)
+                langgraph_tools.append({
+                    "name": module_name,
+                    "tools": module_tools
+                })
+            return langgraph_tools
     except (FileNotFoundError, yaml.YAMLError) as e:
         print(f"Error reading or parsing tools.yaml: {e}")
         return []
@@ -115,15 +123,10 @@ def populate_tool_cache():
     print("Populating tool cache...")
     
     # Process LangGraph tools
-    langgraph_tools = get_langgraph_tools()
-    for tool in langgraph_tools:
-        if "name" in tool:
-            tool['meta'] = {'type': 'langgraph'}
-            TOOL_CACHE["langgraph"].append(tool)
+    TOOL_CACHE["langgraph"] = get_langgraph_tools()
 
     # Process MCPO servers
-    mcpo_servers = discover_mcpo_tools()
-    TOOL_CACHE["mcpo"] = mcpo_servers
+    TOOL_CACHE["mcpo"] = discover_mcpo_tools()
             
     print(f"Tool cache populated.")
 
@@ -146,9 +149,12 @@ def run_tool(req: RunToolRequest):
     tool_def = None
     
     # Search for the tool in LangGraph tools
-    for tool in TOOL_CACHE.get("langgraph", []):
-        if tool["name"] == req.tool_name:
-            tool_def = tool
+    for module in TOOL_CACHE.get("langgraph", []):
+        for tool in module.get("tools", []):
+            if tool["name"] == req.tool_name:
+                tool_def = tool
+                break
+        if tool_def:
             break
 
     # If not found, search in MCPO tools
@@ -173,24 +179,15 @@ def run_tool(req: RunToolRequest):
             raise HTTPException(status_code=500, detail="LangGraph tool has no 'run' command.")
         
         try:
-            # This is a simplified approach. For production, consider safer execution environments.
-            if isinstance(run_command, str) and 'import' in run_command:
-                 # Simplified execution for the 'yt_summarize' example
-                source = req.args.get("source")
-                if source:
-                    from yt_summarize import run_critical_summary
-                    result = run_critical_summary(source)
-                    return {"result": result}
-                else:
-                    raise ValueError("Missing 'source' argument for yt_summarize")
-            else:
-                # Fallback for other potential langgraph tools
-                module_name, function_name = run_command.rsplit('.', 1)
-                module = importlib.import_module(module_name)
-                function_to_run = getattr(module, function_name)
-                result = function_to_run(**req.args)
-                return {"result": result}
-
+            # The run command is expected to be in the format "from <module> import <function>"
+            parts = run_command.split()
+            module_name = parts[1]
+            function_name = parts[3]
+            
+            module = importlib.import_module(module_name)
+            function_to_run = getattr(module, function_name)
+            result = function_to_run(**req.args)
+            return {"result": result}
         except (ImportError, AttributeError, TypeError, Exception) as e:
             raise HTTPException(status_code=500, detail=f"Error running LangGraph tool '{req.tool_name}': {e}")
 
@@ -210,12 +207,6 @@ def run_tool(req: RunToolRequest):
 
     else:
         raise HTTPException(status_code=500, detail=f"Unknown tool type for '{req.tool_name}'.")
-
-@app.post("/yt_summarize")
-def summarize(req: SummarizeRequest):
-    """(Deprecated) Kept for backward compatibility."""
-    result = run_critical_summary(req.source)
-    return {"summary": result}
 
 # ---------------------------------------------------------------------------
 # Run with: python tools-api.py  (or uvicorn tools-api:app --reload)

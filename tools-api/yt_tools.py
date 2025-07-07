@@ -1,32 +1,22 @@
-"""run_agent.py – LangChain orchestration client with HF‑style chat roles
-=====================================================================
-This client:
-1. Sends a URL or local file to Whisper via the GPU‑aware proxy (port 8000).
-2. Receives diarised, speaker‑labelled **plain‑text** (`output=text`).
-3. Feeds that transcript to an LLM served behind the same proxy **using the
-   HuggingFace llama‑3 chat template contraints** (conversation must begin with
-   a `user` role; only user/assistant roles; roles must alternate).
-
-It logs major milestones and automatically retries once on chunked‑encoding
-errors.
+"""yt_tools.py - YouTube transcription and summarization tools
 """
-from __future__ import annotations
-
-import json, logging, mimetypes, os, pathlib, re, sys
-from typing import Literal, Dict, Any
+import logging
+import os
+import re
+import sys
+import time
+import json
+import mimetypes
+import pathlib
+from typing import Dict, Any, Literal
 
 import requests
-from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_openai import ChatOpenAI
-import time
-import textwrap # argparse and textwrap are used in __main__ but not imported at top level
 
-# ---------------------------------------------------------------------------
-# Logging setup – INFO by default; DEBUG for request/response bodies
-# ---------------------------------------------------------------------------
-log_level = os.getenv("RUN_AGENT_LOG", "INFO").upper()
+# --- Logging Setup ---
+log_level = os.getenv("YT_TOOLS_LOG", "INFO").upper()
 logging.basicConfig(
     stream=sys.stderr,
     level=getattr(logging, log_level, logging.INFO),
@@ -35,24 +25,20 @@ logging.basicConfig(
 )
 LOGGER = logging.getLogger(__name__)
 
-# ---------------------------------------------------------------------------
-# REST helpers – auto‑route to the correct Whisper endpoint via the proxy
-# ---------------------------------------------------------------------------
-TRANSCRIBE_ENDPOINT     = f"http://localhost:8003/transcribe"
-TRANSCRIBE_URL_ENDPOINT = f"http://localhost:8003/transcribe_url"
-
+# --- REST Helpers ---
+TRANSCRIBE_ENDPOINT = "http://localhost:8003/transcribe"
+TRANSCRIBE_URL_ENDPOINT = "http://localhost:8003/transcribe_url"
 _URL_RE = re.compile(r"^https?://", re.IGNORECASE)
 
 def _is_url(src: str) -> bool:
     return bool(_URL_RE.match(src))
-
 
 def _call_whisper(source: str, *, output: str = "text", timeout: int = 900) -> Dict[str, Any]:
     """POST helper with logging + single retry for occasional chunked errors."""
 
     def _post(url: str, **kwargs):
         headers = kwargs.pop("headers", {})
-        headers.setdefault("Accept-Encoding", "identity")  # avoid gzip truncation
+        headers.setdefault("Accept-Encoding", "identity")
         LOGGER.debug("POST %s output=%s", url, output)
         resp = requests.post(url, headers=headers, timeout=timeout, **kwargs)
         LOGGER.debug("<- %s %s", resp.status_code, url)
@@ -62,7 +48,6 @@ def _call_whisper(source: str, *, output: str = "text", timeout: int = 900) -> D
         if _is_url(source):
             payload = {"url": source, "output": output}
             return _post(TRANSCRIBE_URL_ENDPOINT, json=payload)
-        # local path
         path = pathlib.Path(source)
         if not path.exists():
             raise FileNotFoundError(path)
@@ -78,51 +63,28 @@ def _call_whisper(source: str, *, output: str = "text", timeout: int = 900) -> D
     for attempt in range(max_retries):
         try:
             resp = _do_request()
-
-            # If model is waking up, proxy returns 202 Accepted.
             if resp.status_code == 202:
                 LOGGER.warning(
                     "Whisper model is waking up (attempt %d/%d). Retrying in %d s...",
                     attempt + 1, max_retries, retry_delay_seconds
                 )
                 time.sleep(retry_delay_seconds)
-                continue  # Move to the next attempt
-
-            resp.raise_for_status()  # Raise for other HTTP errors (4xx, 5xx)
+                continue
+            resp.raise_for_status()
             return resp.json()
-
         except requests.exceptions.ChunkedEncodingError as e:
             LOGGER.warning("ChunkedEncodingError (attempt %d/%d), retrying: %s", attempt + 1, max_retries, e)
             if attempt + 1 >= max_retries:
-                raise  # Re-raise the last exception if all retries fail
+                raise
             time.sleep(retry_delay_seconds)
         except requests.HTTPError as e:
             LOGGER.error("Whisper service HTTPError %s: %s", e.response.status_code, e)
             raise
-
     raise ConnectionError(f"Failed to get a valid response from Whisper after {max_retries} retries.")
 
-
-
-# ---------------------------------------------------------------------------
-# LangChain tool – exposes transcription to the LLM chain
-# ---------------------------------------------------------------------------
-@tool("transcribe_audio", return_direct=True)
-def transcribe_audio_tool(
-    source: str,
-    output: Literal["segments", "words", "sentences", "text"] = "text",
-) -> str:  # noqa: D401
-    """Transcribe a YouTube URL or local file and return the chosen output view."""
-    LOGGER.info("Transcribing %s (view=%s)", source, output)
-    whisper_json = _call_whisper(source, output=output)
-    LOGGER.info("Transcription complete – %s chars", len(whisper_json.get("text", "")))
-    return whisper_json[output] if output != "text" else whisper_json["text"]
-
-# ---------------------------------------------------------------------------
-# Investigative‑journalism prompt – HuggingFace roles: user then assistant
-# ---------------------------------------------------------------------------
+# --- LLM Setup ---
 SYSTEM_MSG = (
-    "You are an experienced investigative journalist and non‑partisan fact‑checker. "
+    "You are an experienced investigative journalist and non-partisan fact-checker. "
     "Your mission is to deconstruct the conversation, probe for bias, and surface what an informed, skeptical viewer still needs to know. "
     "Write with clarity, concision, explicit sourcing, and the Markdown structure provided below."
 )
@@ -174,8 +136,8 @@ PROMPT = ChatPromptTemplate.from_messages([
 ])
 
 LLM = ChatOpenAI(
-    model="chat",                     # served by vLLM
-    openai_api_base=f"http://localhost:8002/v1",
+    model="chat",
+    openai_api_base="http://localhost:8002/v1",
     openai_api_key="not-needed",
     temperature=0.2,
 )
@@ -183,16 +145,20 @@ LLM = ChatOpenAI(
 OUTPUT_PARSER = StrOutputParser()
 LLM_CHAIN = PROMPT | LLM | OUTPUT_PARSER
 
-# ---------------------------------------------------------------------------
-# Convenience: end‑to‑end helper
-# ---------------------------------------------------------------------------
+# --- Tool Functions ---
 
-def run_critical_summary(source: str) -> str:
-    """Transcribe → feed to LLM → return markdown summary."""
+def transcribe_url(source: str, output: Literal["segments", "words", "sentences", "text"] = "text") -> str:
+    """Transcribe a YouTube URL or local file and return the chosen output view."""
+    LOGGER.info("Transcribing %s (view=%s)", source, output)
+    whisper_json = _call_whisper(source, output=output)
+    LOGGER.info("Transcription complete – %s chars", len(whisper_json.get("text", "")))
+    return whisper_json[output] if output != "text" else whisper_json["text"]
+
+def summarize_url(source: str) -> str:
+    """Transcribe a YouTube URL and return a critical summary."""
     LOGGER.info("Starting critical summary for %s", source)
-    # Wake up the LLM agent before starting transcription
     try:
-        wakeup_url = f"http://localhost:8002/wake_up"
+        wakeup_url = "http://localhost:8002/wake_up"
         resp = requests.post(wakeup_url, timeout=10)
         if resp.ok:
             LOGGER.info("Sent wake_up to vllm-agent: %s", resp.json())
@@ -201,10 +167,9 @@ def run_critical_summary(source: str) -> str:
     except Exception as e:
         LOGGER.warning("Exception during wake_up call to vllm-agent: %s", e)
 
-    transcript_text = transcribe_audio_tool.run({"source": source})
+    transcript_text = transcribe_url(source)
     LOGGER.debug("Transcript length: %d chars", len(transcript_text))
 
-    # Add a retry loop to handle the proxy's "waking up" response.
     max_retries = 3
     retry_delay_seconds = 5
 
@@ -225,22 +190,4 @@ def run_critical_summary(source: str) -> str:
                 LOGGER.error("LLM call failed after all retries.")
                 raise
             time.sleep(retry_delay_seconds)
-    # This line is unreachable but added for linters/type-checkers
     return ""
-
-# ---------------------------------------------------------------------------
-# CLI entry‑point
-# ---------------------------------------------------------------------------
-if __name__ == "__main__":
-    import argparse, textwrap
-
-    parser = argparse.ArgumentParser(description="Transcribe + critical summary")
-    parser.add_argument("source", help="YouTube URL | http/https URL | local file path")
-    parser.add_argument("--debug", action="store_true", help="verbose logging")
-    args = parser.parse_args()
-
-    if args.debug:
-        LOGGER.setLevel(logging.DEBUG)
-
-    md_out = run_critical_summary(args.source)
-    print(textwrap.fill(md_out, width=1000))

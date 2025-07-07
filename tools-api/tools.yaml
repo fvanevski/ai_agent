@@ -4,20 +4,31 @@ MCPO Servers:
   My-GitHub: http://localhost:9003
   GitHub-Wiki: http://localhost:9004
 
-Tools:
-- name: yt_summarize
-  description: |
-    Summarize a YouTube video or local file using Whisper and an LLM.
-  parameters:
-    type: object
-    properties:
-      source:
-        type: string
-        description: |
-          The URL of the YouTube video or the path to a local file.
-    required:
-    - source
-  required: true
-  run: |
-    from yt_summarize import run_critical_summary
-    return run_critical_summary(source)
+LangGraph-Tools:
+  yt_tools:
+    - name: summarize_url
+      description: |
+        Summarize a YouTube video or local file using Whisper and an LLM.
+      parameters:
+        type: object
+        properties:
+          source:
+            type: string
+            description: |
+              The URL of the YouTube video or the path to a local file.
+        required:
+        - source
+      run: from yt_tools import summarize_url
+    - name: transcribe_url
+      description: |
+        Transcribe a YouTube video or local file using Whisper.
+      parameters:
+        type: object
+        properties:
+          source:
+            type: string
+            description: |
+              The URL of the YouTube video or the path to a local file.
+        required:
+        - source
+      run: from yt_tools import transcribe_url

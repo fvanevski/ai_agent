@@ -18,6 +18,7 @@ function App() {
   const fileInputRef = useRef(null);
   const [expandedServers, setExpandedServers] = useState({});
   const [expandedMessages, setExpandedMessages] = useState({});
+  const [expandedModules, setExpandedModules] = useState({});
 
   const runEvaluation = async () => {
     const results = await evaluate(sendMessage);
@@ -36,8 +37,8 @@ function App() {
         if (!savedEnabled) {
           // Initialize enabled state if nothing is saved
           const initialEnabled = {};
-          fetchedTools.langgraph.forEach(tool => {
-            initialEnabled[tool.name] = true; // LangGraph tools are toggled individually
+          fetchedTools.langgraph.forEach(module => {
+            initialEnabled[module.name] = true; // LangGraph modules are toggled as a group
           });
           fetchedTools.mcpo.forEach(server => {
             initialEnabled[server.name] = true; // MCPO servers are toggled as a group
@@ -61,8 +62,8 @@ function App() {
   const openSettings = () => setShowSettings(true);
   const closeSettings = () => setShowSettings(false);
 
-  const handleToggleTool = (toolName) => {
-    const updatedEnabled = { ...enabledTools, [toolName]: !enabledTools[toolName] };
+  const handleToggleModule = (moduleName) => {
+    const updatedEnabled = { ...enabledTools, [moduleName]: !enabledTools[moduleName] };
     setEnabledTools(updatedEnabled);
     localStorage.setItem('enabledTools', JSON.stringify(updatedEnabled));
   };
@@ -75,6 +76,10 @@ function App() {
 
   const handleToggleServerExpansion = (serverName) => {
     setExpandedServers(prev => ({ ...prev, [serverName]: !prev[serverName] }));
+  };
+
+  const handleToggleModuleExpansion = (moduleName) => {
+    setExpandedModules(prev => ({ ...prev, [moduleName]: !prev[moduleName] }));
   };
 
   const toggleMessageExpansion = (index) => {
@@ -134,8 +139,20 @@ function App() {
     setFiles([]);
 
     try {
+      const enabledLangGraphModules = tools.langgraph
+        .filter(module => enabledTools[module.name])
+        .map(module => module.name);
+
+      const enabledMcpoServers = tools.mcpo
+        .filter(server => enabledTools[server.name])
+        .map(server => server.name);
+
       const payload = {
         messages: [...messages, { role: 'user', content: apiContent }],
+        enabled_tools: {
+          langgraph: enabledLangGraphModules,
+          mcpo: enabledMcpoServers,
+        }
       };
 
       console.log('Sending payload to http://localhost:8000/chat:', payload);
@@ -253,23 +270,33 @@ function App() {
               {tools.langgraph && tools.langgraph.length > 0 && (
                 <div>
                   <h3>LangGraph Tools</h3>
-                  <ul style={{ listStyle: 'none', padding: 0 }}>
-                    {tools.langgraph.map(tool => (
-                      <li key={tool.name} style={{ marginBottom: 8, display: 'flex', alignItems: 'center' }}>
-                        <span style={{ flex: 1 }}>
-                          <strong>{tool.name}</strong>: {tool.description}
-                        </span>
+                  {tools.langgraph.map(module => (
+                    <div key={module.name} className="server-section" style={{ marginBottom: 16, border: '1px solid #ccc', padding: 10, borderRadius: 5 }}>
+                      <h4 onClick={() => handleToggleModuleExpansion(module.name)}>
+                        <span className={`arrow ${expandedModules[module.name] ? 'down' : 'right'}`}></span>
+                        {module.name}
+                        <div style={{flex: 1}}></div>
                         <label className="switch">
                           <input
                             type="checkbox"
-                            checked={enabledTools[tool.name] || false}
-                            onChange={() => handleToggleTool(tool.name)}
+                            checked={enabledTools[module.name] || false}
+                            onChange={() => handleToggleModule(module.name)}
+                            onClick={(e) => e.stopPropagation()}
                           />
                           <span className="slider round"></span>
                         </label>
-                      </li>
-                    ))}
-                  </ul>
+                      </h4>
+                      {expandedModules[module.name] && enabledTools[module.name] && (
+                        <ul style={{ listStyle: 'none', padding: 0, marginLeft: 40 }}>
+                          {module.tools.map(tool => (
+                            <li key={tool.name} style={{ marginBottom: 8 }}>
+                              <strong>{tool.name}</strong>: {tool.description}
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  ))}
                 </div>
               )}
 

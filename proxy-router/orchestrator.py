@@ -26,9 +26,17 @@ def get_tools():
         return {"langgraph": [], "mcpo": []}
 
 tools_data = get_tools()
-all_tools = tools_data.get("langgraph", [])
+all_tools = []
+# LangGraph tools
+for module in tools_data.get("langgraph", []):
+    for tool in module.get("tools", []):
+        # Prefix the tool name with the module name to avoid collisions
+        tool["name"] = f"{module['name']}_{tool['name']}"
+        all_tools.append(tool)
+# MCPO tools
 for server in tools_data.get("mcpo", []):
-    all_tools.extend(server.get("tools", []))
+    for tool in server.get("tools", []):
+        all_tools.append(tool)
 
 def tool_executor(state):
     """
@@ -39,14 +47,27 @@ def tool_executor(state):
     last_message = state["messages"][-1]
     tool_calls = last_message.tool_calls
 
+    available_tool_names = {tool["name"] for tool in all_tools}
+
     for tool_call in tool_calls:
         tool_name = tool_call.get("name")
         tool_args = tool_call.get("args")
         tool_call_id = tool_call.get("id")
 
+        if tool_name not in available_tool_names:
+            error_msg = f"Error: Tool '{tool_name}' not found. Please select from the available tools."
+            logging.error(error_msg)
+            tool_messages.append(ToolMessage(content=error_msg, tool_call_id=tool_call_id))
+            continue
+
         logging.info(f"Calling tool: {tool_name} with args: {tool_args}")
 
-        run_tool_payload = {"tool_name": tool_name, "args": tool_args}
+        # The tool name sent to the tools-api should not be prefixed
+        original_tool_name = tool_name
+        if tool_name.startswith('yt_tools_'):
+            original_tool_name = tool_name.replace('yt_tools_', '')
+        
+        run_tool_payload = {"tool_name": original_tool_name, "args": tool_args}
         
         try:
             with httpx.Client() as client:
@@ -72,13 +93,14 @@ model = ChatOpenAI(model="chat", temperature=0, streaming=True, base_url="http:/
 
 formatted_tools = []
 for tool in all_tools:
+    description = tool.get("description") or tool.get("summary", "")
     formatted_tools.append(
         {
             "type": "function",
             "function": {
                 "name": tool["name"],
-                "description": tool["description"],
-                "parameters": tool["parameters"],
+                "description": description,
+                "parameters": tool.get("parameters", {}),
             },
         }
     )
