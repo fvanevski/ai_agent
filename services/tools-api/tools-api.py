@@ -53,6 +53,7 @@ def get_langgraph_tools() -> List[Dict[str, Any]]:
                 module_tools = []
                 for tool in tools:
                     tool['meta'] = {'type': 'langgraph', 'module': module_name}
+                    tool['description'] = f"({module_name}) {tool['description']}"
                     module_tools.append(tool)
                 langgraph_tools.append({
                     "name": module_name,
@@ -62,6 +63,19 @@ def get_langgraph_tools() -> List[Dict[str, Any]]:
     except (FileNotFoundError, yaml.YAMLError) as e:
         print(f"Error reading or parsing tools.yaml: {e}")
         return []
+
+def resolve_ref(schema: Dict[str, Any], ref: str) -> Dict[str, Any]:
+    """Resolves a $ref in an OpenAPI schema."""
+    ref_path = ref.split("/")
+    if ref_path[0] == "#":
+        ref_path = ref_path[1:]
+    
+    resolved = schema
+    for part in ref_path:
+        resolved = resolved.get(part)
+        if resolved is None:
+            return None
+    return resolved
 
 def discover_mcpo_tools() -> List[Dict[str, Any]]:
     """Fetches tool definitions from MCPO servers and groups them by server."""
@@ -88,10 +102,29 @@ def discover_mcpo_tools() -> List[Dict[str, Any]]:
                             content = operation["requestBody"].get("content", {})
                             if "application/json" in content:
                                 params = content["application/json"].get("schema", {})
-                        
+                                if params.get("$ref"):
+                                    ref_path = params["$ref"].split("/")
+                                    if ref_path[0] == "#":
+                                        ref_path = ref_path[1:]
+                                    resolved_params = openapi_schema
+                                    for part in ref_path:
+                                        resolved_params = resolved_params.get(part)
+                                        if resolved_params is None:
+                                            break
+                                    if resolved_params:
+                                        params = resolved_params
+
+                        # Always use the full OpenAPI description for the tool
+                        description = operation.get('description', '')
+                        if not description:
+                            description = operation.get('summary', '')
+                        # Prefix with server name for clarity
+                        if server_name:
+                            description = f"({server_name}) {description}" if description else f"({server_name})"
+
                         tool_def = {
-                            "name": operation["operationId"],
-                            "description": operation.get("summary") or operation.get("description", ""),
+                            "name": f"{server_name}_{path.strip('/').replace('/', '_')}",
+                            "description": description,
                             "parameters": params,
                             "meta": {
                                 "type": "mcpo",
@@ -140,7 +173,40 @@ def on_startup():
 @app.get("/get_tools")
 def get_tools():
     """Returns a list of all available tools, grouped by type."""
-    return TOOL_CACHE
+    resolved_tools = {"langgraph": [], "mcpo": []}
+
+    # Resolve LangGraph tools (no change needed here)
+    resolved_tools["langgraph"] = TOOL_CACHE.get("langgraph", [])
+
+    # Resolve MCPO tools
+    for server in TOOL_CACHE.get("mcpo", []):
+        resolved_server_tools = []
+        for tool in server.get("tools", []):
+            if "$ref" in tool["parameters"]:
+                try:
+                    response = requests.get(f"{server['url']}/openapi.json", timeout=5)
+                    response.raise_for_status()
+                    openapi_schema = response.json()
+                    ref_path = tool["parameters"]["$ref"].split("/")
+                    if ref_path[0] == "#":
+                        ref_path = ref_path[1:]
+                    resolved_params = openapi_schema
+                    for part in ref_path:
+                        resolved_params = resolved_params.get(part)
+                        if resolved_params is None:
+                            break
+                    if resolved_params:
+                        tool["parameters"] = resolved_params
+                except (requests.exceptions.RequestException, json.JSONDecodeError) as e:
+                    print(f"Error resolving $ref for tool {tool['name']}: {e}")
+            resolved_server_tools.append(tool)
+        resolved_tools["mcpo"].append({
+            "name": server["name"],
+            "url": server["url"],
+            "tools": resolved_server_tools
+        })
+
+    return resolved_tools
 
 
 @app.post("/run_tool")

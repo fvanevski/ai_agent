@@ -47,7 +47,7 @@ services:
     restart: unless-stopped
     volumes:
       - type: bind
-        source: ./asr-api
+        source: ./services/asr-api
         target: /app
         read_only: true
         bind:
