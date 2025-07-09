@@ -174,7 +174,7 @@ async def call_model(client: httpx.AsyncClient, state: dict, enabled_tool_names:
         try:
             tool_call_str = content.split("<tool_call>")[1].split("</tool_call>")[0].strip()
             tool_call_data = json.loads(tool_call_str)
-            
+
             # Ensure arguments are a JSON string, as expected by run_tool_call
             if isinstance(tool_call_data.get("arguments"), dict):
                 tool_call_data["arguments"] = json.dumps(tool_call_data["arguments"])
@@ -195,14 +195,15 @@ async def call_model(client: httpx.AsyncClient, state: dict, enabled_tool_names:
     # If no tool calls are found (neither in the dedicated field nor in content), return the response directly
     if not tool_calls:
         logging.info("Model returned a direct answer.")
-        return {"messages": [message]}
+        messages.append(message)
+        return {"messages": messages}
 
     # If tool_calls are present, execute them
     logging.info("Model requested tool calls. Executing now.")
     async def run_tool_call(tool_call):
         tool_name = tool_call["function"]["name"]
         tool_args_str = tool_call["function"].get("arguments", "{}")
-        
+
         try:
             tool_args = json.loads(tool_args_str)
         except json.JSONDecodeError:
@@ -215,13 +216,13 @@ async def call_model(client: httpx.AsyncClient, state: dict, enabled_tool_names:
             if "tokens" not in tool_args or not tool_args["tokens"]:
                 tool_args["tokens"] = MODEL_CONTEXT_LENGTH - SAFETY_MARGIN
                 logging.info(f"Setting tokens for Context7_get-library-docs to {tool_args['tokens']}")
-        
+
         logging.info(f"Executing tool: {tool_name} with args: {tool_args}")
         run_tool_payload = {"tool_name": tool_name, "args": tool_args}
         try:
             tool_resp = await client.post(f"{TOOLS_API_URL}/run_tool", json=run_tool_payload)
             tool_resp.raise_for_status()
-            
+
             tool_result_obj = tool_resp.json()
             tool_result = tool_result_obj.get("result")
 
@@ -232,7 +233,7 @@ async def call_model(client: httpx.AsyncClient, state: dict, enabled_tool_names:
 
             if tool_name != "transcribe_url" and len(tool_result_str) > MAX_TOOL_RESULT_CHARS:
                 tool_result_str = tool_result_str[:MAX_TOOL_RESULT_CHARS] + "\n[Result truncated]"
-            
+
             logging.info(f"Tool {tool_name} executed. Result: {tool_result_str[:200]}...")
             return {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": tool_result_str}
         except Exception as e:
@@ -253,7 +254,7 @@ async def call_model(client: httpx.AsyncClient, state: dict, enabled_tool_names:
             title = content.get("title", "No Title")
             description = content.get("description", "No Description")
             transcript = content.get("transcript", "Could not extract transcript.")
-            
+
             # Check if the description is long and truncate if necessary
             if description and len(description) > 500:
                 description = description[:500] + "..."
@@ -305,7 +306,7 @@ app.add_middleware(
 @app.post("/chat")
 async def chat_endpoint(request: Request):
     logging.info("---Request Received---")
-    
+
     # Dynamically refresh tools on each request
     tools_data = get_tools()
     all_tools = []
@@ -315,7 +316,7 @@ async def chat_endpoint(request: Request):
     for server in tools_data.get("mcpo", []):
         for tool in server.get("tools", []):
             all_tools.append(tool)
-    
+
     # Re-bind tools to the model
     formatted_tools = []
     for tool in all_tools:
@@ -371,17 +372,9 @@ async def chat_endpoint(request: Request):
         logging.info(f"Enabled tool names: {filtered_tool_names}")
 
         response = await call_model(request.app.state.client, {"messages": messages}, enabled_tool_names=filtered_tool_names)
-        
-        # Return only the content of the last message
-        last_msg_content = ""
-        if response["messages"]:
-            last_msg = response["messages"][-1]
-            if isinstance(last_msg, dict):
-                last_msg_content = last_msg.get("content", "")
-            elif hasattr(last_msg, "content"):
-                last_msg_content = last_msg.content
-        
-        return {"response": last_msg_content}
+
+        # Return the full message history to include tool call information
+        return {"response": response["messages"]}
     except Exception as e:
         logging.error(f"An error occurred in the chat endpoint: {e}")
         from fastapi import HTTPException

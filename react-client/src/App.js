@@ -1,29 +1,31 @@
-import React, { useState, useEffect, useRef } from 'react';
-import axios from 'axios';
-import './App.css';
-import { evaluate } from './evaluation';
-import MessageList from './components/MessageList';
-import InputArea from './components/InputArea';
-import SettingsModal from './components/SettingsModal';
-import LoadingIndicator from './components/LoadingIndicator';
+import React, { useState, useEffect, useRef } from "react";
+import axios from "axios";
+import "./App.css";
+import { evaluate } from "./evaluation";
+import MessageList from "./components/MessageList";
+import InputArea from "./components/InputArea";
+import SettingsModal from "./components/SettingsModal";
+import LoadingIndicator from "./components/LoadingIndicator";
 
 function App() {
   const [messages, setMessages] = useState([]);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState("");
   const [files, setFiles] = useState([]);
   const [tools, setTools] = useState({});
   const [enabledTools, setEnabledTools] = useState(() => {
-    const saved = localStorage.getItem('enabledTools');
+    const saved = localStorage.getItem("enabledTools");
     return saved ? JSON.parse(saved) : {};
   });
   const [showSettings, setShowSettings] = useState(false);
   const [evaluationResults, setEvaluationResults] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
   const [systemPrompt, setSystemPrompt] = useState(() => {
-    return localStorage.getItem('systemPrompt') || 'You are a helpful assistant.';
+    return (
+      localStorage.getItem("systemPrompt") || "You are a helpful assistant."
+    );
   });
   const [theme, setTheme] = useState(() => {
-    const savedTheme = localStorage.getItem('theme') || 'light';
+    const savedTheme = localStorage.getItem("theme") || "light";
     document.body.className = savedTheme;
     return savedTheme;
   });
@@ -32,7 +34,8 @@ function App() {
 
   useEffect(() => {
     if (chatContainerRef.current) {
-      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+      chatContainerRef.current.scrollTop =
+        chatContainerRef.current.scrollHeight;
     }
   }, [messages, isLoading]);
 
@@ -42,43 +45,49 @@ function App() {
   };
 
   useEffect(() => {
-    localStorage.setItem('systemPrompt', systemPrompt);
+    localStorage.setItem("systemPrompt", systemPrompt);
   }, [systemPrompt]);
 
   useEffect(() => {
-    localStorage.setItem('theme', theme);
+    localStorage.setItem("theme", theme);
     document.body.className = theme; // Apply theme class to body
   }, [theme]);
 
   const toggleTheme = () => {
-    setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
+    setTheme((prevTheme) => (prevTheme === "light" ? "dark" : "light"));
   };
 
   useEffect(() => {
     const fetchTools = async () => {
       try {
-        const response = await axios.get('http://localhost:8080/tools-api/get_tools');
+        const response = await axios.get(
+          "http://localhost:8080/tools-api/get_tools",
+        );
         const fetchedTools = response.data || { langgraph: [], mcpo: [] };
         setTools(fetchedTools);
 
-        const savedEnabled = JSON.parse(localStorage.getItem('enabledTools'));
+        const savedEnabled = JSON.parse(localStorage.getItem("enabledTools"));
         if (!savedEnabled) {
           const initialEnabled = {};
-          fetchedTools.langgraph.forEach(module => {
+          fetchedTools.langgraph.forEach((module) => {
             initialEnabled[module.name] = true;
           });
-          fetchedTools.mcpo.forEach(server => {
+          fetchedTools.mcpo.forEach((server) => {
             initialEnabled[server.name] = true;
           });
           setEnabledTools(initialEnabled);
-          localStorage.setItem('enabledTools', JSON.stringify(initialEnabled));
+          localStorage.setItem("enabledTools", JSON.stringify(initialEnabled));
         } else {
           setEnabledTools(savedEnabled);
         }
-
       } catch (error) {
-        console.error('Error fetching tools:', error);
-        setMessages([{ role: 'assistant', content: 'Error: Could not load tools from the tools-api.' }]);
+        console.error("Error fetching tools:", error);
+        setMessages([
+          {
+            role: "assistant",
+            content: "Error: Could not load tools from the tools-api.",
+          },
+        ]);
       }
     };
     fetchTools();
@@ -88,27 +97,33 @@ function App() {
   const closeSettings = () => setShowSettings(false);
 
   const handleToggleModule = (moduleName) => {
-    const updatedEnabled = { ...enabledTools, [moduleName]: !enabledTools[moduleName] };
+    const updatedEnabled = {
+      ...enabledTools,
+      [moduleName]: !enabledTools[moduleName],
+    };
     setEnabledTools(updatedEnabled);
-    localStorage.setItem('enabledTools', JSON.stringify(updatedEnabled));
+    localStorage.setItem("enabledTools", JSON.stringify(updatedEnabled));
   };
 
   const handleToggleServer = (serverName) => {
-    const updatedEnabled = { ...enabledTools, [serverName]: !enabledTools[serverName] };
+    const updatedEnabled = {
+      ...enabledTools,
+      [serverName]: !enabledTools[serverName],
+    };
     setEnabledTools(updatedEnabled);
-    localStorage.setItem('enabledTools', JSON.stringify(updatedEnabled));
+    localStorage.setItem("enabledTools", JSON.stringify(updatedEnabled));
   };
 
   const handleFileChange = (event) => {
     const selectedFiles = Array.from(event.target.files);
     const newFiles = [];
 
-    selectedFiles.forEach(file => {
+    selectedFiles.forEach((file) => {
       const reader = new FileReader();
       reader.onload = (e) => {
         newFiles.push({ name: file.name, content: e.target.result });
         if (newFiles.length === selectedFiles.length) {
-          setFiles(prevFiles => [...prevFiles, ...newFiles]);
+          setFiles((prevFiles) => [...prevFiles, ...newFiles]);
         }
       };
       reader.readAsText(file);
@@ -121,68 +136,81 @@ function App() {
   };
 
   const removeFile = (fileNameToRemove) => {
-    setFiles(prevFiles => prevFiles.filter(file => file.name !== fileNameToRemove));
+    setFiles((prevFiles) =>
+      prevFiles.filter((file) => file.name !== fileNameToRemove),
+    );
   };
 
   const startNewChat = () => {
     setMessages([]);
     setFiles([]);
-    setInput('');
+    setInput("");
   };
 
   const sendMessage = async () => {
     const trimmedInput = input.trim();
-    if (trimmedInput === '' && files.length === 0) return;
+    if (trimmedInput === "" && files.length === 0) return;
 
-    const userMessageForDisplay = { role: 'user', content: trimmedInput };
+    const userMessageForDisplay = { role: "user", content: trimmedInput };
     const currentMessages = [...messages, userMessageForDisplay];
     setMessages(currentMessages);
     setIsLoading(true);
 
     let apiContent = trimmedInput;
     if (files.length > 0) {
-      const fileContext = files.map(file =>
-        `CONTEXT FROM FILE: ${file.name}\n\n---\n\n${file.content}`
-      ).join('\n\n---\n\n');
+      const fileContext = files
+        .map(
+          (file) => `CONTEXT FROM FILE: ${file.name}\n\n---\n\n${file.content}`,
+        )
+        .join("\n\n---\n\n");
       apiContent = `${fileContext}\n\n---\n\nQUESTION:\n${trimmedInput}`;
     }
 
-    setInput('');
+    setInput("");
     setFiles([]);
 
     try {
       const enabledLangGraphModules = tools.langgraph
-        .filter(module => enabledTools[module.name])
-        .map(module => module.name);
+        .filter((module) => enabledTools[module.name])
+        .map((module) => module.name);
 
       const enabledMcpoServers = tools.mcpo
-        .filter(server => enabledTools[server.name])
-        .map(server => server.name);
+        .filter((server) => enabledTools[server.name])
+        .map((server) => server.name);
 
       const payload = {
         messages: [
-          { role: 'system', content: systemPrompt },
-          ...messages, 
-          { role: 'user', content: apiContent }
+          { role: "system", content: systemPrompt },
+          ...messages,
+          { role: "user", content: apiContent },
         ],
         enabled_tools: {
           langgraph: enabledLangGraphModules,
           mcpo: enabledMcpoServers,
-        }
+        },
       };
 
-      console.log('Sending payload to http://localhost:8080/agent-service/chat:', payload);
+      console.log(
+        "Sending payload to http://localhost:8080/agent-service/chat:",
+        payload,
+      );
 
-      const response = await axios.post('http://localhost:8080/agent-service/chat', payload);
+      const response = await axios.post(
+        "http://localhost:8080/agent-service/chat",
+        payload,
+      );
 
-      const botMessage = { role: 'assistant', content: response.data.response };
-      setMessages(prevMessages => [...prevMessages, botMessage]);
-
+      // The server returns the full message history of the last turn.
+      // We replace the user's message with the full history from the server response.
+      const finalMessages = response.data.response.filter(
+        (msg) => msg.role !== "system",
+      );
+      setMessages(finalMessages);
     } catch (error) {
-      console.error('Error communicating with the agent service:', error);
-      let errorMsg = 'Error: Could not connect to the agent service.';
+      console.error("Error communicating with the agent service:", error);
+      let errorMsg = "Error: Could not connect to the agent service.";
       if (error.response && error.response.data) {
-        if (typeof error.response.data === 'string') {
+        if (typeof error.response.data === "string") {
           errorMsg += `\n${error.response.data}`;
         } else if (error.response.data.error) {
           errorMsg += `\n${error.response.data.error}`;
@@ -192,7 +220,10 @@ function App() {
       } else if (error.message) {
         errorMsg += `\n${error.message}`;
       }
-      setMessages(prevMessages => [...prevMessages, { role: 'assistant', content: errorMsg }]);
+      setMessages((prevMessages) => [
+        ...prevMessages,
+        { role: "assistant", content: errorMsg },
+      ]);
     } finally {
       setIsLoading(false);
     }
@@ -204,7 +235,7 @@ function App() {
         <h1>AI Agent</h1>
         <div className="header-buttons">
           <button onClick={toggleTheme} className="theme-toggle">
-            {theme === 'light' ? '🌙' : '☀️'}
+            {theme === "light" ? "🌙" : "☀️"}
           </button>
           <button onClick={startNewChat}>New Chat</button>
           <button onClick={openSettings}>Settings</button>
