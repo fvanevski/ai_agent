@@ -8,18 +8,7 @@ load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 GOOGLE_CSE_ID = os.getenv("GOOGLE_CSE_ID")
 
-def search(
-    query: str,
-    num: int = 10,
-    dateRestrict: str = None,
-    exactTerms: str = None,
-    excludeTerms: str = None,
-    fileType: str = None,
-    lr: str = None,
-    safe: str = "off",
-    siteSearch: str = None,
-    sort: str = None,
-):
+def search(query: str, **kwargs):
     """
     Performs a web search using Google's Programmable Search Engine.
     """
@@ -27,22 +16,26 @@ def search(
         return "Error: Google API key or CSE ID is not set."
 
     url = "https://www.googleapis.com/customsearch/v1"
+
+    # Define valid API parameters to filter kwargs
+    valid_params = {
+        "c2coff", "cr", "dateRestrict", "exactTerms", "excludeTerms",
+        "fileType", "filter", "gl", "highRange", "hl", "hq", "imgColorType",
+        "imgDominantColor", "imgSize", "imgType", "linkSite", "lowRange",
+        "lr", "num", "orTerms", "rights", "safe", "searchType",
+        "siteSearch", "siteSearchFilter", "sort", "start"
+    }
+
     params = {
         "key": GOOGLE_API_KEY,
         "cx": GOOGLE_CSE_ID,
         "q": query,
-        "num": num,
-        "dateRestrict": dateRestrict,
-        "exactTerms": exactTerms,
-        "excludeTerms": excludeTerms,
-        "fileType": fileType,
-        "lr": lr,
-        "safe": safe,
-        "siteSearch": siteSearch,
-        "sort": sort,
     }
-    # Remove None values from params
-    params = {k: v for k, v in params.items() if v is not None}
+
+    # Add valid optional parameters from kwargs
+    for key, value in kwargs.items():
+        if key in valid_params and value is not None:
+            params[key] = value
 
     try:
         response = requests.get(url, params=params)

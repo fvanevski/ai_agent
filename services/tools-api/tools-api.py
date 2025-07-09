@@ -69,7 +69,7 @@ def resolve_ref(schema: Dict[str, Any], ref: str) -> Dict[str, Any]:
     ref_path = ref.split("/")
     if ref_path[0] == "#":
         ref_path = ref_path[1:]
-    
+
     resolved = schema
     for part in ref_path:
         resolved = resolved.get(part)
@@ -135,7 +135,7 @@ def discover_mcpo_tools() -> List[Dict[str, Any]]:
                             }
                         }
                         server_tools.append(tool_def)
-            
+
             if server_tools:
                 servers.append({
                     "name": server_name,
@@ -154,13 +154,13 @@ def populate_tool_cache():
     global TOOL_CACHE
     TOOL_CACHE = {"langgraph": [], "mcpo": []} # Re-initialize cache
     print("Populating tool cache...")
-    
+
     # Process LangGraph tools
     TOOL_CACHE["langgraph"] = get_langgraph_tools()
 
     # Process MCPO servers
     TOOL_CACHE["mcpo"] = discover_mcpo_tools()
-            
+
     print(f"Tool cache populated.")
 
 @app.on_event("startup")
@@ -213,7 +213,7 @@ def get_tools():
 def run_tool(req: RunToolRequest):
     """Runs a tool by name with the given arguments."""
     tool_def = None
-    
+
     # Search for the tool in LangGraph tools
     for module in TOOL_CACHE.get("langgraph", []):
         for tool in module.get("tools", []):
@@ -243,13 +243,13 @@ def run_tool(req: RunToolRequest):
         run_command = tool_def.get("run")
         if not run_command:
             raise HTTPException(status_code=500, detail="LangGraph tool has no 'run' command.")
-        
+
         try:
             # The run command is expected to be in the format "from <module> import <function>"
             parts = run_command.split()
             module_name = parts[1]
             function_name = parts[3]
-            
+
             module = importlib.import_module(module_name)
             function_to_run = getattr(module, function_name)
             result = function_to_run(**req.args)
@@ -261,9 +261,9 @@ def run_tool(req: RunToolRequest):
         server_url = tool_meta.get("server_url")
         path = tool_meta.get("path")
         method = tool_meta.get("method", "post")
-        
+
         endpoint_url = f"{server_url}{path}"
-        
+
         try:
             response = requests.request(method, endpoint_url, json=req.args, timeout=30)
             response.raise_for_status()
@@ -284,5 +284,5 @@ if __name__ == "__main__":
     port = int(os.getenv("PORT", 9000))
     host = os.getenv("HOST", "0.0.0.0")
     reload = os.getenv("RELOAD", "false").lower() in ("true", "1")
-    
+
     uvicorn.run("tools-api:app", host=host, port=port, reload=reload)

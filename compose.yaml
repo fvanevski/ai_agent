@@ -105,7 +105,7 @@ services:
   vllm-agent:
     command:
       - --model
-      - /models/Qwen3-8B-64k-Context-2X-Josiefied-Uncensored-AWQ
+      - jnvdx666/Qwen3-14B-abliterated-awq
       - --port
       - "8002"
       - --served-model-name

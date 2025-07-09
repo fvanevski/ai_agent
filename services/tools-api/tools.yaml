@@ -32,6 +32,7 @@ LangGraph-Tools:
         required:
           - source
       run: from yt_tools import transcribe_url
+      no_think: true
   google_search:
     - name: search
       description: |
@@ -85,3 +86,4 @@ LangGraph-Tools:
         required:
           - query
       run: from google_search import search
+      no_think: true
