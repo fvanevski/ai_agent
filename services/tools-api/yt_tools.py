@@ -148,11 +148,52 @@ LLM_CHAIN = PROMPT | LLM | OUTPUT_PARSER
 # --- Tool Functions ---
 
 def transcribe_url(source: str, output: Literal["segments", "words", "sentences", "text"] = "text") -> str:
-    """Transcribe a YouTube URL or local file and return the chosen output view."""
+    """Transcribe a YouTube URL or local file and return the chosen output view as a JSON string, plus metadata if available."""
     LOGGER.info("Transcribing %s (view=%s)", source, output)
-    whisper_json = _call_whisper(source, output=output)
-    LOGGER.info("Transcription complete – %s chars", len(whisper_json.get("text", "")))
-    return whisper_json[output] if output != "text" else whisper_json["text"]
+    
+    # Initialize return dictionary
+    result = {"transcript": "Could not extract transcript.", "title": "No Title", "description": "No Description"}
+
+    # --- YouTube Metadata Fetching ---
+    if _is_url(source) and "youtube.com" in source or "youtu.be" in source:
+        video_id_match = re.search(r"(?:v=|\/)([0-9A-Za-z_-]{11}).*", source)
+        if video_id_match:
+            video_id = video_id_match.group(1)
+            api_key = os.getenv("GOOGLE_API_KEY")
+            if api_key:
+                metadata_url = f"https://www.googleapis.com/youtube/v3/videos?part=snippet&id={video_id}&key={api_key}"
+                try:
+                    resp = requests.get(metadata_url, timeout=10)
+                    resp.raise_for_status()
+                    metadata = resp.json()
+                    if metadata.get("items"):
+                        snippet = metadata["items"][0].get("snippet", {})
+                        result["title"] = snippet.get("title")
+                        result["description"] = snippet.get("description")
+                        LOGGER.info("Fetched YouTube metadata for video ID: %s", video_id)
+                except requests.RequestException as e:
+                    LOGGER.warning("Could not fetch YouTube metadata: %s", e)
+            else:
+                LOGGER.warning("GOOGLE_API_KEY not set, cannot fetch YouTube metadata.")
+
+    # --- Transcription ---
+    try:
+        whisper_json = _call_whisper(source, output=output)
+        LOGGER.info("Transcription complete – %s chars", len(whisper_json.get("text", "")))
+        
+        # Ensure the requested output format exists in the response
+        if output in whisper_json:
+            result["transcript"] = whisper_json[output]
+        elif "text" in whisper_json:
+            # Fallback to 'text' if the desired output isn't found
+            result["transcript"] = whisper_json["text"]
+            LOGGER.warning("Requested output '%s' not in Whisper response, fell back to 'text'.", output)
+
+    except (requests.HTTPError, ConnectionError) as e:
+        LOGGER.error("Transcription failed for %s: %s", source, e)
+        # Keep the default error message for the transcript
+    
+    return json.dumps(result, indent=2)
 
 def summarize_url(source: str) -> str:
     """Transcribe a YouTube URL and return a critical summary."""

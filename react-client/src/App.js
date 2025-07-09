@@ -22,7 +22,19 @@ function App() {
   const [systemPrompt, setSystemPrompt] = useState(() => {
     return localStorage.getItem('systemPrompt') || 'You are a helpful assistant.';
   });
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem('theme') || 'light';
+    document.body.className = savedTheme;
+    return savedTheme;
+  });
   const fileInputRef = useRef(null);
+  const chatContainerRef = useRef(null);
+
+  useEffect(() => {
+    if (chatContainerRef.current) {
+      chatContainerRef.current.scrollTop = chatContainerRef.current.scrollHeight;
+    }
+  }, [messages, isLoading]);
 
   const runEvaluation = async () => {
     const results = await evaluate(sendMessage);
@@ -32,6 +44,15 @@ function App() {
   useEffect(() => {
     localStorage.setItem('systemPrompt', systemPrompt);
   }, [systemPrompt]);
+
+  useEffect(() => {
+    localStorage.setItem('theme', theme);
+    document.body.className = theme; // Apply theme class to body
+  }, [theme]);
+
+  const toggleTheme = () => {
+    setTheme(prevTheme => (prevTheme === 'light' ? 'dark' : 'light'));
+  };
 
   useEffect(() => {
     const fetchTools = async () => {
@@ -182,12 +203,15 @@ function App() {
       <header className="App-header">
         <h1>AI Agent</h1>
         <div className="header-buttons">
+          <button onClick={toggleTheme} className="theme-toggle">
+            {theme === 'light' ? '🌙' : '☀️'}
+          </button>
           <button onClick={startNewChat}>New Chat</button>
           <button onClick={openSettings}>Settings</button>
           <button onClick={runEvaluation}>Run Evaluation</button>
         </div>
       </header>
-      <div className="chat-container">
+      <div className="chat-container" ref={chatContainerRef}>
         <MessageList messages={messages} />
         {isLoading && <LoadingIndicator />}
         <InputArea
@@ -222,4 +246,3 @@ function App() {
 }
 
 export default App;
-

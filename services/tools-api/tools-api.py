@@ -267,7 +267,8 @@ def run_tool(req: RunToolRequest):
         try:
             response = requests.request(method, endpoint_url, json=req.args, timeout=30)
             response.raise_for_status()
-            return response.json()
+            # Wrap the result to be consistent with LangGraph tools
+            return {"result": response.json()}
         except requests.exceptions.RequestException as e:
             raise HTTPException(status_code=500, detail=f"Error calling MCPO tool '{req.tool_name}': {e}")
 
