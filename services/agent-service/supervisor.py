@@ -1,81 +1,72 @@
-# supervisor.py ── container + sleep orchestration
-import os, time, subprocess, requests
-from threading import Thread
+# supervisor.py ─ A modern supervisor for AI models
+import asyncio
+import httpx
+import os
+from fastapi import FastAPI, Request
+from dotenv import load_dotenv
+import logging
+import time
 
-MODEL_PORTS = {
-    "llama.cpp-embedding": 8001,
-    "vllm-agent":          8002,
-    "faster-whisper":      8003,
-}
+load_dotenv()
 
+logging.basicConfig(level=logging.INFO)
 
-# Only vllm-agent uses inactivity-based sleep/stop
-MODELS_WITH_SLEEP_API = {"vllm-agent"}
-last_activity = {m: 0 for m in MODEL_PORTS}
-SLEEP_AFTER = int(os.getenv("INACTIVITY_SLEEP_SECONDS", 300))   # 5 min
-STOP_AFTER  = int(os.getenv("INACTIVITY_STOP_SECONDS", 3600))   # 1 h
+app = FastAPI()
 
-# ---------------- helpers ---------------- #
+# --- Model Configuration ---
+CHAT_MODEL_URL = os.getenv("VLLM_AGENT_URL", "http://localhost:8002")
+SLEEP_AFTER_SECONDS = int(os.getenv("INACTIVITY_SLEEP_SECONDS", 300))  # 5 minutes
 
-def record_activity(model):
-    last_activity[model] = time.time()
+# --- State ---
+last_activity_time = time.time()
 
-def _post(url, t=3):
+# --- Helper Functions ---
+async def is_chat_model_sleeping():
     try:
-        requests.post(url, timeout=t)
-    except requests.exceptions.RequestException:
-        pass
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{CHAT_MODEL_URL}/is_sleeping", timeout=2)
+            if response.status_code == 200:
+                return response.json().get("is_sleeping", True)
+    except httpx.RequestError as e:
+        logging.error(f"Error checking if chat model is sleeping: {e}")
+    return True # Assume sleeping on error
 
-def _get(url, t=2):
+async def sleep_chat_model():
+    if not await is_chat_model_sleeping():
+        try:
+            async with httpx.AsyncClient() as client:
+                await client.post(f"{CHAT_MODEL_URL}/sleep", timeout=3)
+                logging.info("Chat model put to sleep due to inactivity.")
+        except httpx.RequestError as e:
+            logging.error(f"Error putting chat model to sleep: {e}")
+
+async def wake_chat_model():
     try:
-        return requests.get(url, timeout=t)
-    except requests.exceptions.RequestException:
-        return None
+        async with httpx.AsyncClient() as client:
+            await client.post(f"{CHAT_MODEL_URL}/wake_up", timeout=3)
+            logging.info("Waking up chat model.")
+    except httpx.RequestError as e:
+        logging.error(f"Error waking up chat model: {e}")
 
-def is_model_awake(model) -> bool:
-    if model == "vllm-agent":
-        r = _get(f"http://localhost:{MODEL_PORTS[model]}/is_sleeping")
-        return bool(r and r.status_code == 200 and not r.json().get("is_sleeping"))
-    # For faster-whisper, awake means container is running
-    return _container_running(model)
-
-def wake_model(model):
-    if not _container_running(model):
-        subprocess.run(["docker", "start", model], stdout=subprocess.DEVNULL)
-    elif model == "vllm-agent":
-        _post(f"http://localhost:{MODEL_PORTS[model]}/wake_up", t=3)
-
-def sleep_model(model):
-    if model == "vllm-agent":
-        _post(f"http://localhost:{MODEL_PORTS[model]}/sleep", t=3)
-
-# -------- docker helpers -------- #
-
-def _container_running(model):
-    out = subprocess.run(
-        ["docker", "inspect", "-f", "{{.State.Running}}", model],
-        capture_output=True, text=True
-    ).stdout.strip()
-    return out == "true"
-
-def _stop_container(model):
-    subprocess.run(["docker", "stop", model], stdout=subprocess.DEVNULL, check=False)
-
-# ------------- main loop ------------- #
-
-def run_supervisor():
+# --- Background Task ---
+async def inactivity_monitor():
     while True:
-        now = time.time()
-        # vllm-agent: sleep after inactivity, stop after longer inactivity
-        vllm_idle = now - last_activity.get("vllm-agent", 0)
-        if vllm_idle > SLEEP_AFTER and is_model_awake("vllm-agent"):
-            sleep_model("vllm-agent")
-        if vllm_idle > STOP_AFTER and _container_running("vllm-agent"):
-            _stop_container("vllm-agent")
+        await asyncio.sleep(60)  # Check every minute
+        if time.time() - last_activity_time > SLEEP_AFTER_SECONDS:
+            await sleep_chat_model()
 
-        # faster-whisper: stop after 1 hour inactivity
-        fw_idle = now - last_activity.get("faster-whisper", 0)
-        if fw_idle > STOP_AFTER and _container_running("faster-whisper"):
-            _stop_container("faster-whisper")
+@app.on_event("startup")
+async def startup_event():
+    asyncio.create_task(inactivity_monitor())
 
-        time.sleep(60)
+# --- API Endpoints ---
+@app.post("/activity")
+async def record_activity():
+    global last_activity_time
+    last_activity_time = time.time()
+    logging.info("Activity recorded.")
+    return {"status": "activity recorded"}
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=9005)

@@ -26,6 +26,13 @@
       "env": {
         "MEMORY_FILE_PATH": "${input:memory_file_path}"
       }
+    },
+    "Task Master": {
+      "command": "npx",
+      "args": ["-y", "--package=task-master-ai", "task-master-ai"],
+      "env": {
+        "GOOGLE_API_KEY": "AIzaSyAzbFNNGq641mIUSv4V8GMVj0dPxH87pkM"
+      }
     }
   }
 }

@@ -1,105 +1,186 @@
-To connect agentic tools running on a FastAPI server to your local LLM on vLLM, enabling your model to discover and intelligently use them, you will need to establish a robust architecture that facilitates communication, tool definition, execution, and feedback. Here's a detailed approach:
-1. Understanding LLM Tool Calling Functionality
-First, it's crucial to understand that Large Language Models (LLMs) themselves do not directly execute code or make API calls. Instead, they act as "smart function dispatchers", generating structured output (often in JSON format) that suggests which tool to call and with what arguments based on the user's natural language input. This output then needs to be parsed and executed by an external system or "agent" in your runtime environment. The results of this execution are then fed back to the LLM as "observations" for it to continue its reasoning or formulate a final response. This iterative process, known as a "Perception ⇒ Reflexion ⇒ Action" cycle, is fundamental to LLM agents.
-2. Setting Up Your FastAPI Server for Tools
-Your FastAPI server will serve as the backend for hosting your custom tools and exposing them as accessible endpoints. FastAPI is an excellent choice for this due to its ease of use for building APIs and its ability to automatically generate OpenAPI/Swagger documentation, which can be leveraged for tool discovery.
-•
-Define Tool Endpoints: Each tool you want your LLM to use should correspond to a specific FastAPI endpoint. These endpoints will encapsulate the business logic or external interactions (e.g., querying a database, interacting with another service, performing calculations).
-•
-Structured Request/Response: Design your FastAPI endpoints to expect and return structured data, ideally JSON, mirroring the parameter definitions your LLM will be trained to generate.
-•
-FastAPI-MCP (Model Context Protocol): To enable seamless discovery and interaction by AI models, consider using FastAPI-MCP. This open-source library automatically exposes your FastAPI endpoints as Model Context Protocol (MCP) tools with zero configuration. It identifies all available FastAPI endpoints, transforms them into MCP tools, and preserves their request/response schemas and existing documentation. This standardization helps AI agents understand how to interact with your APIs effectively and safely, reducing development time.
-◦
-FastAPI-MCP can be mounted directly within your FastAPI application or deployed as a standalone service.
-◦
-It's particularly useful for use cases like conversational documentation, internal automation, data querying agents, and multi-agent orchestration.
-3. Configuring vLLM for Tool Calling
-vLLM is a high-performance serving engine for LLMs that has built-in support for tool calling. This means it can be configured to understand tool definitions and produce the structured output required for tool invocation.
-•
-Enable Tool Calling: When starting your vLLM server, you must enable tool calling capabilities. This typically involves using flags like --enable-auto-tool-choice.
-•
-Specify Tool Parser and Chat Template: vLLM requires a --tool-call-parser and often a specific --chat-template that dictates how the model should format its output when it decides to call a tool. Different models (e.g., Llama 3.1, Mistral, IBM Granite, Qwen) may have specific parsers and chat templates optimized for their architecture and training.
-◦
-For Llama 3.1, you would use --tool-call-parser llama3_json and examples/tool_chat_template_llama3.1_json.jinja.
-◦
-vLLM supports tool_choice options like "auto", "required", and "none" to control whether the model decides to use a tool, is forced to use one, or is prevented from using any. The "auto" setting allows the model to intelligently decide when to use a tool.
-•
-Tool Definitions in Request: When making a request to your vLLM endpoint, you will need to provide the definitions of the tools your model can use. These definitions include the tool's name, description, and the JSON schema for its parameters.
-◦
-For example, a tool definition for weather might include name: "get_weather", description: "Get the current weather in a given location", and parameters for location and unit.
-4. Orchestrating the Tool Calling Workflow
-The "smartness" of the LLM in using the right tool at the right time comes from a combination of its underlying reasoning capabilities and how you design the agentic workflow and prompt engineering.
-•
-The Agent/Orchestrator Layer: This is the critical component that sits between your chat client and the LLM/FastAPI tools. It performs the following steps in a loop:
-1.
-Receive User Input: Your chat client sends the user's query to your orchestrator.
-2.
-Prompt LLM with Tools: The orchestrator constructs a prompt for the vLLM model, including the user's query and the available tool definitions (name, description, parameters).
-3.
-Get LLM Response: The vLLM model, if configured for tool calling, will generate a response that either answers the user directly or includes a tool_call object specifying the tool to use and its arguments.
-4.
-Parse LLM Tool Call: The orchestrator parses the vLLM's output to extract the tool_call information (tool name and arguments).
-5.
-Execute Tool via FastAPI: The orchestrator then dynamically calls the corresponding endpoint on your FastAPI server using the extracted arguments.
-6.
-Receive Tool Result: The FastAPI server executes the tool's logic and returns the result to the orchestrator.
-7.
-Feed Back to LLM: The orchestrator sends the tool's result back to the vLLM model, usually as an "observation" or by appending it to the conversation history with a "tool" role message. This provides the LLM with the context it needs for its next "thought" or action.
-8.
-Generate Final Response/Next Action: The LLM processes the tool's output and determines if further tools are needed or if it has enough information to formulate a final, coherent response to the user.
-9.
-Return to User: The orchestrator sends the final LLM response back to your chat client.
-•
-Frameworks for Orchestration: Building this loop from scratch can be complex. Frameworks like LangChain are designed to simplify this process by providing abstractions for LLM interaction, tool management, and conversational memory.
-◦
-LangChain's create_react_agent can bind tools to a model and manage the ReAct (Reasoning and Acting) framework, where the LLM converses with itself to decide actions.
-◦
-LangGraph, an extension of LangChain, helps define complex, stateful workflows with branching and looping, ideal for multi-step agentic behaviors.
-◦
-You can integrate your local Ollama/vLLM instance with LangChain using ChatOllama or similar wrappers.
-◦
-You can create custom tools within LangChain that call your FastAPI endpoints.
-5. Ensuring Intelligent Tool Selection
-For the LLM to be "smart" about using the right tool at the right time, several strategies are employed:
-•
-Prompt Engineering: This is paramount. The system prompt injected into the LLM guides its behavior. It should clearly define the LLM's role, the available tools, their descriptions, and the expected format for tool calls.
-◦
-Explicitly describe what each tool is "good at".
-◦
-You can even instruct the LLM on its limitations (e.g., "Assistant is terrible at maths. When provided with math questions... assistant always refers to its trusty tools...") to encourage tool use.
-•
-Tool Descriptions and Parameter Schemas: Detailed and clear descriptions of tools and their arguments (using JSON Schema) are essential for the LLM to correctly identify when a tool is relevant and how to populate its parameters.
-•
-In-context Examples: Providing a few-shot examples (demonstrations of task decomposition and tool usage) to the LLM can significantly improve its ability to understand rules and generate appropriate dependency graphs.
-•
-Temperature Setting: For tool usage, a low temperature (e.g., 0) is often recommended for the LLM during inference. This reduces "randomness" or "creativity" and encourages the model to strictly follow instructions and tool definitions, leading to more reliable tool calls.
-•
-Parallel Function Calling: For tasks that involve multiple independent queries, implementing parallel function calling can significantly reduce latency and cost.
-◦
-LLMCompiler is a framework designed to optimize parallel function calling by formulating execution plans and dispatching tasks concurrently. This is particularly beneficial for "embarrassingly parallel" tasks, like searching for multiple pieces of information simultaneously.
-◦
-Some models and frameworks, like certain Pythonic tool call implementations in vLLM, inherently support parallel tool calls.
-•
-Metadata Improvement and Agent Query Language (AQL): For highly optimized and adaptive API usage, embedding dynamic metadata (e.g., data freshness indicators, error recovery suggestions) in API responses and adopting an Agent Query Language (AQL) can enhance real-time workflow adaptation, reduce redundant queries, and optimize decision-making.
-6. Important Considerations
-•
-Hallucinations: LLMs, especially smaller open-source models, can still hallucinate or try to use the wrong tool. Careful prompt engineering, clear tool definitions, and potentially "guardrails" (e.g., using another LLM to validate output or checking for unexpected tool calls) can help mitigate this.
-•
-Security: When exposing LLM functionalities via an API, especially with API keys, ensure proper security measures are in place. Control access to your LLM API from a secure backend server to prevent direct access to sensitive tokens from the frontend.
-•
-Memory: For multi-turn conversations where the agent needs to remember previous interactions or user preferences (like in your "San Francisco" weather example), integrate conversational memory. Frameworks like LangChain provide ConversationBufferWindowMemory to store chat history.
-•
-Model Selection: Not all open-source LLMs are equally capable of tool calling. Models specifically fine-tuned for tool calling, such as dolphin-mixtral (a fine-tune of mixtral-8x7b-instruct), Functionary-small/medium-v2.2-GGUF, and Qwen2.5 (with Hermes-style tool use), have shown better performance in consistently recognizing and properly calling functions.
-•
-Cost and Latency: While local LLMs offer privacy and cost savings compared to cloud APIs, tool calling involves multiple LLM invocations and external API calls, which can introduce latency. Optimizing the orchestration (e.g., parallel calls) and ensuring efficient FastAPI endpoint performance is key.
-In summary, the process involves:
-1.
-Developing your tools as FastAPI endpoints.
-2.
-Optionally using FastAPI-MCP to formalize tool exposure.
-3.
-Serving your local LLM with vLLM, enabling its tool-calling features and selecting appropriate parsers/templates.
-4.
-Implementing an orchestrator (potentially using a framework like LangChain/LangGraph) to manage the loop: LLM prompts for tool calls, tool execution via FastAPI, and feeding results back to the LLM.**
-5.
-Leveraging prompt engineering and careful tool definitions to guide the LLM's decision-making.
+# AI Agent
+
+This project is a conversational AI agent with a web-based UI. It uses a microservices architecture to handle different aspects of the system, including a language model, an ASR service, and a tool execution service.
+
+## Architecture
+
+The project is divided into two main parts: a `react-client` frontend and a `services` backend.
+
+### Frontend
+
+The frontend is a React application that provides a chat interface for interacting with the AI agent. It communicates with the backend via a proxy router.
+
+#### Key Features:
+
+*   **Chat Interface**: Allows users to interact with the AI agent.
+*   **File Upload**: Users can upload files for processing.
+*   **Settings Modal**: Enables toggling tools and servers.
+*   **Evaluation**: Runs predefined queries to test tool execution.
+
+#### Key Files:
+
+*   `src/App.js`: Main application logic, including state management and API calls.
+*   `src/components/ChatWindow.js`: Renders the chat interface.
+*   `src/components/InputArea.js`: Handles user input and file uploads.
+*   `src/components/MessageList.js`: Displays chat messages.
+*   `src/components/SettingsModal.js`: Manages tool and server settings.
+
+#### Style and Design:
+
+The frontend uses CSS for styling, with key files including:
+
+*   `src/App.css`: Contains global styles for the application.
+*   `src/index.css`: Defines base styles for the application.
+
+To modernize the design:
+
+*   Use a clean color palette with gradients.
+*   Add animations for transitions and message entry.
+*   Ensure responsiveness for mobile and tablet views.
+*   Integrate Google Fonts for improved typography.
+
+### Backend
+
+The backend consists of several microservices:
+
+#### **`proxy-router`**
+
+*   **Purpose**: Acts as a reverse proxy, routing requests to the appropriate backend service.
+*   **Endpoints**:
+    *   `/{service}/{path:path}`: Routes requests to the specified service.
+*   **Configuration**:
+    *   Service URLs are defined in the `SERVICE_URLS` dictionary.
+
+#### **`agent-service`**
+
+*   **Purpose**: Core of the AI agent, handling tool execution and language model interactions.
+*   **Endpoints**:
+    *   `/chat`: Processes user queries and executes tools.
+*   **Key Features**:
+    *   Dynamically sets the `tokens` parameter for tool calls based on model context length.
+    *   Executes tools directly via HTTP requests.
+*   **Settings**:
+    *   `MODEL_CONTEXT_LENGTH`: Defines the maximum context size for the language model.
+
+#### **`asr-api`**
+
+*   **Purpose**: Provides automatic speech recognition (ASR) using a fine-tuned Whisper model.
+*   **Endpoints**:
+    *   `/transcribe`: Transcribes audio files.
+    *   `/transcribe_url`: Transcribes audio from a URL.
+    *   `/is_sleeping`: Checks if the service is idle.
+    *   `/sleep` and `/wake_up`: Toggles GPU idle state.
+*   **Key Features**:
+    *   Supports word-level timestamps.
+    *   Offers multiple output formats (segments, words, sentences, text).
+
+#### **`tools-api`**
+
+*   **Purpose**: Exposes tools for use by the agent.
+*   **Endpoints**:
+    *   `/get_tools`: Returns a list of available tools.
+    *   `/run_tool`: Executes a specified tool.
+*   **Key Features**:
+    *   Supports LangChain-based tools and MCP servers.
+    *   Tools are defined in `tools.yaml`.
+
+### Tool Calling Scheme
+
+The agent uses a direct tool calling scheme:
+
+*   Tools are executed via HTTP requests.
+*   The `Context7_get-library-docs` tool dynamically adjusts its `tokens` parameter based on the model's context length.
+*   Tool results are truncated if they exceed the maximum allowed size.
+
+### Settings
+
+#### Environment Variables:
+
+*   `TOOLS_API_URL`: URL for the tools API.
+*   `VLLM_AGENT_URL`: URL for the language model service.
+*   `MODEL_CONTEXT_LENGTH`: Maximum context size for the language model.
+
+#### Proxy Router:
+
+*   Routes requests to services based on the `SERVICE_URLS` configuration.
+
+### Debugging
+
+To debug the code:
+
+1.  **Frontend**:
+    *   Use browser developer tools to inspect API calls and component state.
+    *   Check console logs for errors.
+2.  **Backend**:
+    *   Review service logs for errors.
+    *   Use tools like `curl` or Postman to test endpoints.
+3.  **Tool Execution**:
+    *   Verify tool definitions in `tools.yaml`.
+    *   Check the `agent-service` logs for tool execution details.
+
+This README provides a comprehensive overview of the architecture and implementation, enabling effective debugging and development.
+
+## Getting Started
+
+### Prerequisites
+
+*   [Node.js](https://nodejs.org/)
+*   [Python](https://www.python.org/)
+*   [Docker](https://www.docker.com/)
+
+### Installation
+
+1.  Clone the repository:
+
+    ```bash
+    git clone https://github.com/your-username/ai-agent.git
+    cd ai-agent
+    ```
+
+2.  Install the frontend dependencies:
+
+    ```bash
+    cd react-client
+    npm install
+    cd ..
+    ```
+
+3.  Install the backend dependencies:
+
+    ```bash
+    pip install -r requirements.txt
+    ```
+
+### Running the Application
+
+1.  Start the backend services:
+
+    ```bash
+    docker-compose up -d
+    ```
+
+2.  Start the agent, tool, and proxy router services (these are run as user services that auto-reload upon changes):
+
+    ```bash
+    ./services.sh start
+    ```
+
+3.  Start the frontend:
+
+    ```bash
+    cd react-client
+    pnpm run start
+    ```
+
+The application will be available at [http://localhost:3000](http://localhost:3000).
+
+## Usage
+
+Once the application is running, you can interact with the AI agent by typing messages in the chat window. You can also upload files and select which tools the agent should use.
+
+## To-Do
+
+*   Refresh the React client frontend UI to be more modern and visually appealing (including implementing features useful for AI agent chatbots, such as being able to enter new lines using SHIFT-RETURN).
+*   Fully implement the model state management to put the chat model to "sleep" after 5 min inactivity and properly handle "wake_up" of the model when needed (and removing the "stop" behaviour after 1 hour inactivity to stop the docker containers running the models).
+*   Implement web search into the AI agent chat client using Google's Programmable Search Element Paid API.
+*   Refactor the codebase to maximize modularity and scalability and to facilitate readability and implementation of additional features.

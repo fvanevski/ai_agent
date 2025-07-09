@@ -1,8 +1,14 @@
 import React, { useState } from 'react';
 
-function SettingsModal({ showSettings, closeSettings, tools, enabledTools, handleToggleModule, handleToggleServer }) {
+function SettingsModal({ showSettings, closeSettings, tools, enabledTools, handleToggleModule, handleToggleServer, systemPrompt, setSystemPrompt }) {
   const [expandedServers, setExpandedServers] = useState({});
   const [expandedModules, setExpandedModules] = useState({});
+  const [localSystemPrompt, setLocalSystemPrompt] = useState(systemPrompt);
+
+  const handleSave = () => {
+    setSystemPrompt(localSystemPrompt);
+    closeSettings();
+  };
 
   const handleToggleServerExpansion = (serverName) => {
     setExpandedServers(prev => ({ ...prev, [serverName]: !prev[serverName] }));
@@ -20,8 +26,18 @@ function SettingsModal({ showSettings, closeSettings, tools, enabledTools, handl
     <div className="modal-overlay" style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 0, background: 'rgba(0,0,0,0.3)', zIndex: 1000 }}>
       <div className="modal">
         <div className="modal-content">
-          <h2>Tool Settings</h2>
+          <h2>Settings</h2>
           
+          <div className="system-prompt-section" style={{ marginBottom: 16, border: '1px solid #ccc', padding: 10, borderRadius: 5 }}>
+            <h3>System Prompt</h3>
+            <textarea
+              value={localSystemPrompt}
+              onChange={(e) => setLocalSystemPrompt(e.target.value)}
+              rows="4"
+              style={{ width: '100%', resize: 'vertical' }}
+            />
+          </div>
+
           {tools.langgraph && tools.langgraph.length > 0 && (
             <div>
               <h3>LangGraph Tools</h3>
@@ -89,7 +105,8 @@ function SettingsModal({ showSettings, closeSettings, tools, enabledTools, handl
           )}
         </div>
         <div className="modal-footer">
-          <button onClick={closeSettings}>Close</button>
+          <button onClick={handleSave}>Save & Close</button>
+          <button onClick={closeSettings} style={{ marginLeft: 8 }}>Cancel</button>
         </div>
       </div>
     </div>

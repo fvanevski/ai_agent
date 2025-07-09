@@ -1,3 +1,5 @@
+from contextlib import asynccontextmanager
+import asyncio
 import os
 from dotenv import load_dotenv
 import logging
@@ -8,6 +10,18 @@ from langchain_openai import ChatOpenAI
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 import traceback
+
+# --- App Lifespan Management ---
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: Create a single, reusable httpx.AsyncClient
+    app.state.client = httpx.AsyncClient(timeout=120)
+    yield
+    # Shutdown: Close the client
+    await app.state.client.aclose()
+
+# --- FastAPI App Initialization ---
+app = FastAPI(title="Agent Service", lifespan=lifespan)
 
 # --- Logging Setup ---
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -24,9 +38,11 @@ MODEL_CONTEXT_LENGTH = int(os.getenv("MODEL_CONTEXT_LENGTH", "8192"))
 # 2. Define the tools
 def get_tools():
     try:
-        response = httpx.get(f"{TOOLS_API_URL}/get_tools")
-        response.raise_for_status()
-        return response.json()
+        # Use a temporary synchronous client for this initial setup
+        with httpx.Client() as client:
+            response = client.get(f"{TOOLS_API_URL}/get_tools")
+            response.raise_for_status()
+            return response.json()
     except httpx.RequestError as e:
         logging.error(f"Error fetching tools: {e}")
         return {"langgraph": [], "mcpo": []}
@@ -65,7 +81,7 @@ logging.info(f"Formatted tools: {formatted_tools}")
 
 
 
-def call_model(state, enabled_tool_names=None):
+async def call_model(client: httpx.AsyncClient, state: dict, enabled_tool_names: list = None):
     logging.info("---Calling Model (OpenAI API direct)---")
     # Build OpenAI-compatible messages list
     system_prompt = (
@@ -120,83 +136,94 @@ def call_model(state, enabled_tool_names=None):
     url = VLLM_AGENT_URL.replace("/v1", "") + "/v1/chat/completions"
     headers = {"Content-Type": "application/json"}
 
-    # Loop: keep sending messages until no tool_calls are returned
+    # Single-pass tool execution
     MAX_TOOL_RESULT_CHARS = 4000  # Truncate tool results to avoid context overflow
     SAFETY_MARGIN = 2000  # Reserve tokens for prompt, user, and assistant messages
-    while True:
-        payload = {
-            "model": "chat",
-            "messages": messages,
-            "tools": tools_payload,
-            "tool_choice": "auto"
-        }
-        # Log the full JSON payload in a pretty format for debugging
-        logging.info("=== Payload sent to vLLM ===\n%s", json.dumps(payload, indent=2, ensure_ascii=False))
-        try:
-            resp = httpx.post(url, headers=headers, json=payload, timeout=120)
-            if resp.status_code == 400 and "maximum context length" in resp.text:
-                logging.error(f"vLLM context overflow: {resp.text}")
-                return {"messages": [{"role": "assistant", "content": "[Error: The model's context window was exceeded. The tool result was too large to process. Please ask for a more specific or summarized result, or try again with a narrower query.]"}]}
-            resp.raise_for_status()
-            result = resp.json()
-        except Exception as e:
-            logging.error(f"Error calling vLLM API: {e}")
-            return {"messages": [{"role": "assistant", "content": f"[Error calling vLLM API: {e}]"}]}
 
-        logging.info(f"vLLM response: {result}")
-        # vLLM returns a 'choices' list
-        choice = result["choices"][0]
-        message = choice["message"]
-        # If tool_calls present, execute them
-        if "tool_calls" in message and message["tool_calls"]:
-            tool_results = []
-            for tool_call in message["tool_calls"]:
-                tool_name = tool_call["function"]["name"]
-                tool_args = json.loads(tool_call["function"].get("arguments", "{}"))
-                tool_call_id = tool_call["id"]
-                # Patch: If Context7_get-library-docs, set tokens param based on MODEL_CONTEXT_LENGTH
-                if tool_name == "Context7_get-library-docs":
-                    if "tokens" not in tool_args or not tool_args["tokens"]:
-                        # Estimate available tokens: context length - safety margin
-                        tool_args["tokens"] = MODEL_CONTEXT_LENGTH - SAFETY_MARGIN
-                        logging.info(f"Setting tokens for Context7_get-library-docs to {tool_args['tokens']} (MODEL_CONTEXT_LENGTH={MODEL_CONTEXT_LENGTH}, SAFETY_MARGIN={SAFETY_MARGIN})")
-                logging.info(f"Executing tool: {tool_name} with args: {tool_args}")
-                run_tool_payload = {"tool_name": tool_name, "args": tool_args}
-                try:
-                    with httpx.Client() as client:
-                        tool_resp = client.post(f"{TOOLS_API_URL}/run_tool", json=run_tool_payload, timeout=120)
-                        tool_resp.raise_for_status()
-                        tool_result = tool_resp.json()
-                        tool_result_str = json.dumps(tool_result)
-                        if len(tool_result_str) > MAX_TOOL_RESULT_CHARS:
-                            tool_result_str = tool_result_str[:MAX_TOOL_RESULT_CHARS] + "\n[Result truncated due to context limits. Ask for more details if needed.]"
-                        logging.info(f"Tool {tool_name} executed. Result: {tool_result_str[:200]}... (truncated)" if len(tool_result_str) > 200 else f"Tool {tool_name} executed. Result: {tool_result_str}")
-                        tool_results.append({
-                            "role": "tool",
-                            "tool_call_id": tool_call_id,
-                            "name": tool_name,
-                            "content": tool_result_str
-                        })
-                except Exception as e:
-                    logging.error(f"Error executing tool {tool_name}: {e}")
-                    tool_results.append({
-                        "role": "tool",
-                        "tool_call_id": tool_call_id,
-                        "name": tool_name,
-                        "content": f"[Error executing tool: {e}]"
-                    })
-            # Append tool results to messages and continue loop
-            messages.append(message)
-            messages.extend(tool_results)
-            continue
-        # No tool calls: return the model's message as the final answer
-        messages.append(message)
+    # Initial model call
+    payload = {
+        "model": "chat",
+        "messages": messages,
+        "tools": tools_payload,
+        "tool_choice": "auto"
+    }
+    logging.info("=== Payload sent to vLLM ===\n%s", json.dumps(payload, indent=2, ensure_ascii=False))
+    try:
+        logging.info("--- Sending request to vLLM ---")
+        resp = await client.post(url, headers=headers, json=payload)
+        logging.info(f"--- Received response from vLLM with status code: {resp.status_code} ---")
+
+        if resp.status_code == 400 and "maximum context length" in resp.text:
+            logging.error(f"vLLM context overflow: {resp.text}")
+            return {"messages": [{"role": "assistant", "content": "[Error: The model's context window was exceeded. The tool result was too large to process. Please ask for a more specific or summarized result, or try again with a narrower query.]"}]}
+        resp.raise_for_status()
+        result = resp.json()
+    except Exception as e:
+        logging.error(f"Error calling vLLM API: {e}")
+        return {"messages": [{"role": "assistant", "content": f"[Error calling vLLM API: {e}]"}]}
+
+    logging.info(f"vLLM response: {result}")
+    choice = result["choices"][0]
+    message = choice["message"]
+
+    # If no tool calls, return the response directly
+    if not message.get("tool_calls"):
+        logging.info("Model returned a direct answer.")
         return {"messages": [message]}
 
+    # If tool_calls are present, execute them
+    logging.info("Model requested tool calls. Executing now.")
+    async def run_tool_call(tool_call):
+        tool_name = tool_call["function"]["name"]
+        tool_args = json.loads(tool_call["function"].get("arguments", "{}"))
+        tool_call_id = tool_call["id"]
+        if tool_name == "Context7_get-library-docs":
+            if "tokens" not in tool_args or not tool_args["tokens"]:
+                tool_args["tokens"] = MODEL_CONTEXT_LENGTH - SAFETY_MARGIN
+                logging.info(f"Setting tokens for Context7_get-library-docs to {tool_args['tokens']}")
+        logging.info(f"Executing tool: {tool_name} with args: {tool_args}")
+        run_tool_payload = {"tool_name": tool_name, "args": tool_args}
+        try:
+            tool_resp = await client.post(f"{TOOLS_API_URL}/run_tool", json=run_tool_payload)
+            tool_resp.raise_for_status()
+            tool_result = tool_resp.json()
+            tool_result_str = json.dumps(tool_result)
+            if tool_name != "transcribe_url" and len(tool_result_str) > MAX_TOOL_RESULT_CHARS:
+                tool_result_str = tool_result_str[:MAX_TOOL_RESULT_CHARS] + "\n[Result truncated]"
+            logging.info(f"Tool {tool_name} executed. Result: {tool_result_str[:200]}...")
+            return {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": tool_result_str}
+        except Exception as e:
+            logging.error(f"Error executing tool {tool_name}: {e}")
+            return {"role": "tool", "tool_call_id": tool_call_id, "name": tool_name, "content": f"[Error: {e}]"}
 
+    tool_results = await asyncio.gather(*(run_tool_call(tc) for tc in message["tool_calls"]))
 
-# 5. Create the FastAPI app
-app = FastAPI(title="Agent Service")
+    # Handle special case for transcribe_url
+    transcribe_tool_result = next((r for r in tool_results if r["name"] == "transcribe_url" and "[Error" not in r["content"]), None)
+    if transcribe_tool_result:
+        logging.info("Returning full transcript from transcribe_url.")
+        try:
+            return {"messages": [{"role": "assistant", "content": json.loads(transcribe_tool_result["content"]).get("result", "")}]}
+        except json.JSONDecodeError:
+            return {"messages": [{"role": "assistant", "content": transcribe_tool_result["content"]}]}
+
+    # Append tool results and make the final model call
+    messages.append(message)
+    messages.extend(tool_results)
+
+    final_payload = {"model": "chat", "messages": messages}
+    logging.info("=== Final payload sent to vLLM ===\n%s", json.dumps(final_payload, indent=2, ensure_ascii=False))
+    try:
+        resp = await client.post(url, headers=headers, json=final_payload)
+        resp.raise_for_status()
+        final_result = resp.json()
+        final_message = final_result["choices"][0]["message"]
+        logging.info(f"Final model response: {final_message}")
+        return {"messages": [final_message]}
+    except Exception as e:
+        logging.error(f"Error in final vLLM call: {e}")
+        return {"messages": [{"role": "assistant", "content": f"[Error in final model call: {e}]"}]}
+
 
 origins = ["http://localhost:3000", "http://localhost:8080"]
 
@@ -212,6 +239,35 @@ app.add_middleware(
 @app.post("/chat")
 async def chat_endpoint(request: Request):
     logging.info("---Request Received---")
+    
+    # Dynamically refresh tools on each request
+    tools_data = get_tools()
+    all_tools = []
+    for module in tools_data.get("langgraph", []):
+        for tool in module.get("tools", []):
+            all_tools.append(tool)
+    for server in tools_data.get("mcpo", []):
+        for tool in server.get("tools", []):
+            all_tools.append(tool)
+    
+    # Re-bind tools to the model
+    formatted_tools = []
+    for tool in all_tools:
+        description = tool.get("description") or tool.get("summary", "")
+        formatted_tools.append(
+            {
+                "type": "function",
+                "function": {
+                    "name": tool["name"],
+                    "description": description,
+                    "parameters": tool.get("parameters", {}),
+                },
+            }
+        )
+    global model
+    model = model.bind_tools(formatted_tools)
+    logging.info("Refreshed and bound tools.")
+
     def safe_get_content(msg):
         if hasattr(msg, "content"):
             return msg.content
@@ -248,7 +304,7 @@ async def chat_endpoint(request: Request):
         logging.info(f"Enabled servers/modules: {enabled_server_names}")
         logging.info(f"Enabled tool names: {filtered_tool_names}")
 
-        response = call_model({"messages": messages}, enabled_tool_names=filtered_tool_names)
+        response = await call_model(request.app.state.client, {"messages": messages}, enabled_tool_names=filtered_tool_names)
         last_msg = response["messages"][-1]
         return {"response": safe_get_content(last_msg)}
     except Exception as e:

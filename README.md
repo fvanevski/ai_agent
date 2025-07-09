@@ -10,15 +10,115 @@ The project is divided into two main parts: a `react-client` frontend and a `ser
 
 The frontend is a React application that provides a chat interface for interacting with the AI agent. It communicates with the backend via a proxy router.
 
+#### Key Features:
+
+*   **Chat Interface**: Allows users to interact with the AI agent.
+*   **File Upload**: Users can upload files for processing.
+*   **Settings Modal**: Enables toggling tools and servers.
+*   **Evaluation**: Runs predefined queries to test tool execution.
+
+#### Key Files:
+
+*   `src/App.js`: Main application logic, including state management and API calls.
+*   `src/components/ChatWindow.js`: Renders the chat interface.
+*   `src/components/InputArea.js`: Handles user input and file uploads.
+*   `src/components/MessageList.js`: Displays chat messages.
+*   `src/components/SettingsModal.js`: Manages tool and server settings.
+
+#### Style and Design:
+
+The frontend uses CSS for styling, with key files including:
+
+*   `src/App.css`: Contains global styles for the application.
+*   `src/index.css`: Defines base styles for the application.
+
+To modernize the design:
+
+*   Use a clean color palette with gradients.
+*   Add animations for transitions and message entry.
+*   Ensure responsiveness for mobile and tablet views.
+*   Integrate Google Fonts for improved typography.
+
 ### Backend
 
 The backend consists of several microservices:
 
-*   **`proxy-router`**: A pure reverse proxy that routes requests to the appropriate backend service. It is the single entry point for all frontend requests.
-*   **`agent-service`**: The core of the AI agent. It uses LangGraph to create a conversational agent that can use tools to answer questions.
-*   **`asr-api`**: An automatic speech recognition (ASR) service that uses a fine-tuned Whisper model to transcribe audio.
-*   **`tools-api`**: A service that exposes a set of tools that can be used by the agent.
-*   **`vllm-agent`**: A service that runs the language model.
+#### **`proxy-router`**
+
+*   **Purpose**: Acts as a reverse proxy, routing requests to the appropriate backend service.
+*   **Endpoints**:
+    *   `/{service}/{path:path}`: Routes requests to the specified service.
+*   **Configuration**:
+    *   Service URLs are defined in the `SERVICE_URLS` dictionary.
+
+#### **`agent-service`**
+
+*   **Purpose**: Core of the AI agent, handling tool execution and language model interactions.
+*   **Endpoints**:
+    *   `/chat`: Processes user queries and executes tools.
+*   **Key Features**:
+    *   Dynamically sets the `tokens` parameter for tool calls based on model context length.
+    *   Executes tools directly via HTTP requests.
+*   **Settings**:
+    *   `MODEL_CONTEXT_LENGTH`: Defines the maximum context size for the language model.
+
+#### **`asr-api`**
+
+*   **Purpose**: Provides automatic speech recognition (ASR) using a fine-tuned Whisper model.
+*   **Endpoints**:
+    *   `/transcribe`: Transcribes audio files.
+    *   `/transcribe_url`: Transcribes audio from a URL.
+    *   `/is_sleeping`: Checks if the service is idle.
+    *   `/sleep` and `/wake_up`: Toggles GPU idle state.
+*   **Key Features**:
+    *   Supports word-level timestamps.
+    *   Offers multiple output formats (segments, words, sentences, text).
+
+#### **`tools-api`**
+
+*   **Purpose**: Exposes tools for use by the agent.
+*   **Endpoints**:
+    *   `/get_tools`: Returns a list of available tools.
+    *   `/run_tool`: Executes a specified tool.
+*   **Key Features**:
+    *   Supports LangChain-based tools and MCP servers.
+    *   Tools are defined in `tools.yaml`.
+
+### Tool Calling Scheme
+
+The agent uses a direct tool calling scheme:
+
+*   Tools are executed via HTTP requests.
+*   The `Context7_get-library-docs` tool dynamically adjusts its `tokens` parameter based on the model's context length.
+*   Tool results are truncated if they exceed the maximum allowed size.
+
+### Settings
+
+#### Environment Variables:
+
+*   `TOOLS_API_URL`: URL for the tools API.
+*   `VLLM_AGENT_URL`: URL for the language model service.
+*   `MODEL_CONTEXT_LENGTH`: Maximum context size for the language model.
+
+#### Proxy Router:
+
+*   Routes requests to services based on the `SERVICE_URLS` configuration.
+
+### Debugging
+
+To debug the code:
+
+1.  **Frontend**:
+    *   Use browser developer tools to inspect API calls and component state.
+    *   Check console logs for errors.
+2.  **Backend**:
+    *   Review service logs for errors.
+    *   Use tools like `curl` or Postman to test endpoints.
+3.  **Tool Execution**:
+    *   Verify tool definitions in `tools.yaml`.
+    *   Check the `agent-service` logs for tool execution details.
+
+This README provides a comprehensive overview of the architecture and implementation, enabling effective debugging and development.
 
 ## Getting Started
 
@@ -59,23 +159,17 @@ The backend consists of several microservices:
     docker-compose up -d
     ```
 
-2.  Start the proxy router:
+2.  Start the agent, tool, and proxy router services (these are run as user services that auto-reload upon changes):
 
     ```bash
-    python services/proxy-router/proxy_router.py
+    ./services.sh start
     ```
 
-3.  Start the agent service:
-
-    ```bash
-    python services/agent-service/agent.py
-    ```
-
-4.  Start the frontend:
+3.  Start the frontend:
 
     ```bash
     cd react-client
-    npm start
+    pnpm run start
     ```
 
 The application will be available at [http://localhost:3000](http://localhost:3000).

@@ -1,12 +1,16 @@
 # proxy_router.py ─ A pure reverse proxy
 import httpx
 import os
+import asyncio
 from fastapi import FastAPI, Request
 from fastapi.responses import StreamingResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
+import logging
 
 load_dotenv()
+
+logging.basicConfig(level=logging.INFO)
 
 app = FastAPI()
 
@@ -29,12 +33,49 @@ SERVICE_URLS = {
     "asr-api": os.getenv("ASR_API_URL", "http://localhost:8003"),
     "tools-api": os.getenv("TOOLS_API_URL", "http://localhost:9000"),
     "vllm-agent": os.getenv("VLLM_AGENT_URL", "http://localhost:8002"),
+    "supervisor": "http://localhost:9005",
 }
 
 client = httpx.AsyncClient()
 
-@app.api_route("/{service}/{path:path}", methods=["GET", "POST", "PUT", "DELETE"])
+async def is_chat_model_sleeping():
+    chat_model_url = SERVICE_URLS.get("vllm-agent")
+    if not chat_model_url:
+        return True
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(f"{chat_model_url}/is_sleeping", timeout=2)
+            if response.status_code == 200:
+                return response.json().get("is_sleeping", True)
+    except httpx.RequestError as e:
+        logging.error(f"Error checking if chat model is sleeping: {e}")
+    return True
+
+async def wake_and_notify(service: str):
+    if service == "agent-service":
+        try:
+            if await is_chat_model_sleeping():
+                chat_model_url = SERVICE_URLS.get("vllm-agent")
+                if chat_model_url:
+                    await client.post(f"{chat_model_url}/wake_up", timeout=3)
+                    logging.info("Woke up chat model, resetting prefix cache...")
+                    await client.post(f"{chat_model_url}/reset_prefix_cache", timeout=3)
+                    logging.info("Prefix cache reset.")
+            
+            supervisor_url = SERVICE_URLS.get("supervisor")
+            if supervisor_url:
+                await client.post(f"{supervisor_url}/activity", timeout=2)
+                logging.info("Notified supervisor of activity.")
+
+        except httpx.RequestError as e:
+            logging.error(f"Error during wake_and_notify: {e}")
+
+
+@app.api_route("/{service}/{path:path}", methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"])
 async def proxy(service: str, path: str, request: Request):
+    if request.method != "OPTIONS":
+        await wake_and_notify(service)
+
     if service not in SERVICE_URLS:
         return {"error": f"Service '{service}' not found"}
 
@@ -43,7 +84,6 @@ async def proxy(service: str, path: str, request: Request):
 
     # Prepare the request to the downstream service
     headers = dict(request.headers)
-    # httpx uses 'host' in headers to connect, which might not be desirable
     headers.pop("host", None)
 
     # Make the request to the downstream service
@@ -55,7 +95,7 @@ async def proxy(service: str, path: str, request: Request):
             headers=headers,
             content=body,
             params=request.query_params,
-            timeout=30.0,
+            timeout=300.0,
         )
     except httpx.ConnectError as e:
         return {"error": f"Could not connect to {service}: {e}"}

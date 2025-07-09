@@ -1,6 +1,15 @@
-import React from 'react';
+import React, { useRef, useEffect } from 'react';
 
 function InputArea({ input, setInput, files, sendMessage, removeFile, triggerFileUpload, fileInputRef, handleFileChange }) {
+  const textareaRef = useRef(null);
+
+  useEffect(() => {
+    if (textareaRef.current) {
+      textareaRef.current.style.height = 'auto';
+      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`;
+    }
+  }, [input]);
+
   return (
     <div className="input-area">
       {files.length > 0 && (
@@ -22,13 +31,19 @@ function InputArea({ input, setInput, files, sendMessage, removeFile, triggerFil
           style={{ display: 'none' }}
         />
         <button onClick={triggerFileUpload} className="upload-btn">📎</button>
-        <input
-          type="text"
+        <textarea
+          ref={textareaRef}
           value={input}
           onChange={(e) => setInput(e.target.value)}
-          onKeyPress={(e) => e.key === 'Enter' && sendMessage()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault();
+              sendMessage();
+            }
+          }}
           placeholder="Type your message or upload files..."
-        />
+          rows="1"
+        ></textarea>
         <button onClick={sendMessage}>Send</button>
       </div>
     </div>

@@ -2,8 +2,10 @@ import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import './App.css';
 import { evaluate } from './evaluation';
-import ChatWindow from './components/ChatWindow';
+import MessageList from './components/MessageList';
+import InputArea from './components/InputArea';
 import SettingsModal from './components/SettingsModal';
+import LoadingIndicator from './components/LoadingIndicator';
 
 function App() {
   const [messages, setMessages] = useState([]);
@@ -16,12 +18,20 @@ function App() {
   });
   const [showSettings, setShowSettings] = useState(false);
   const [evaluationResults, setEvaluationResults] = useState(null);
+  const [isLoading, setIsLoading] = useState(false);
+  const [systemPrompt, setSystemPrompt] = useState(() => {
+    return localStorage.getItem('systemPrompt') || 'You are a helpful assistant.';
+  });
   const fileInputRef = useRef(null);
 
   const runEvaluation = async () => {
     const results = await evaluate(sendMessage);
     setEvaluationResults(results);
   };
+
+  useEffect(() => {
+    localStorage.setItem('systemPrompt', systemPrompt);
+  }, [systemPrompt]);
 
   useEffect(() => {
     const fetchTools = async () => {
@@ -106,6 +116,7 @@ function App() {
     const userMessageForDisplay = { role: 'user', content: trimmedInput };
     const currentMessages = [...messages, userMessageForDisplay];
     setMessages(currentMessages);
+    setIsLoading(true);
 
     let apiContent = trimmedInput;
     if (files.length > 0) {
@@ -128,7 +139,11 @@ function App() {
         .map(server => server.name);
 
       const payload = {
-        messages: [...messages, { role: 'user', content: apiContent }],
+        messages: [
+          { role: 'system', content: systemPrompt },
+          ...messages, 
+          { role: 'user', content: apiContent }
+        ],
         enabled_tools: {
           langgraph: enabledLangGraphModules,
           mcpo: enabledMcpoServers,
@@ -157,29 +172,35 @@ function App() {
         errorMsg += `\n${error.message}`;
       }
       setMessages(prevMessages => [...prevMessages, { role: 'assistant', content: errorMsg }]);
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
     <div className="App">
       <header className="App-header">
-        <h1>Local LLM Chat</h1>
-        <button onClick={startNewChat} className="new-chat-btn">New Chat</button>
-        <button onClick={openSettings} className="settings-btn" style={{ marginLeft: 8 }}>Settings</button>
-        <button onClick={runEvaluation} className="evaluation-btn" style={{ marginLeft: 8 }}>Run Evaluation</button>
+        <h1>AI Agent</h1>
+        <div className="header-buttons">
+          <button onClick={startNewChat}>New Chat</button>
+          <button onClick={openSettings}>Settings</button>
+          <button onClick={runEvaluation}>Run Evaluation</button>
+        </div>
       </header>
-      <ChatWindow
-        messages={messages}
-        files={files}
-        input={input}
-        setInput={setInput}
-        setFiles={setFiles}
-        sendMessage={sendMessage}
-        removeFile={removeFile}
-        triggerFileUpload={triggerFileUpload}
-        fileInputRef={fileInputRef}
-        handleFileChange={handleFileChange}
-      />
+      <div className="chat-container">
+        <MessageList messages={messages} />
+        {isLoading && <LoadingIndicator />}
+        <InputArea
+          input={input}
+          setInput={setInput}
+          files={files}
+          sendMessage={sendMessage}
+          removeFile={removeFile}
+          triggerFileUpload={triggerFileUpload}
+          fileInputRef={fileInputRef}
+          handleFileChange={handleFileChange}
+        />
+      </div>
       {evaluationResults && (
         <div className="evaluation-results">
           <h2>Evaluation Results</h2>
@@ -193,9 +214,12 @@ function App() {
         enabledTools={enabledTools}
         handleToggleModule={handleToggleModule}
         handleToggleServer={handleToggleServer}
+        systemPrompt={systemPrompt}
+        setSystemPrompt={setSystemPrompt}
       />
     </div>
   );
 }
 
 export default App;
+

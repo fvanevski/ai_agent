@@ -26,11 +26,12 @@ node_modules/
 # OS specific
 .DS_Store
 
-# Task files
 .taskmaster/
-tasks.json
-tasks/ 
 
 # Docker files
 compose.yaml
 Dockerfile
+
+# Task files
+# tasks.json
+# tasks/ 
