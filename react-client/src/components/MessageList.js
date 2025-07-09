@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 
 const ToolCallDisplay = ({ toolCall, toolResult }) => {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -44,6 +44,15 @@ const ToolCallDisplay = ({ toolCall, toolResult }) => {
 
 function MessageList({ messages }) {
   const [expandedThoughts, setExpandedThoughts] = useState({});
+  const messagesEndRef = useRef(null);
+
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [messages]);
 
   const toggleThoughtExpansion = (index) => {
     setExpandedThoughts((prev) => ({ ...prev, [index]: !prev[index] }));
@@ -199,6 +208,7 @@ function MessageList({ messages }) {
           </div>
         );
       })}
+      <div ref={messagesEndRef} />
     </div>
   );
 }

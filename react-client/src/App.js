@@ -29,6 +29,7 @@ function App() {
     document.body.className = savedTheme;
     return savedTheme;
   });
+
   const fileInputRef = useRef(null);
   const chatContainerRef = useRef(null);
 
@@ -234,9 +235,11 @@ function App() {
       <header className="App-header">
         <h1>AI Agent</h1>
         <div className="header-buttons">
-          <button onClick={toggleTheme} className="theme-toggle">
-            {theme === "light" ? "🌙" : "☀️"}
-          </button>
+          <dark-mode-toggle
+            id="theme-toggle"
+            appearance="toggle"
+            onClick={toggleTheme}
+          ></dark-mode-toggle>
           <button onClick={startNewChat}>New Chat</button>
           <button onClick={openSettings}>Settings</button>
           <button onClick={runEvaluation}>Run Evaluation</button>
