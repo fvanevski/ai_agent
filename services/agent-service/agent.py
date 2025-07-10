@@ -81,7 +81,7 @@ logging.info(f"Formatted tools: {formatted_tools}")
 
 
 
-async def call_model(client: httpx.AsyncClient, state: dict, enabled_tool_names: list = None, use_thinking: bool = True):
+async def call_model(client: httpx.AsyncClient, state: dict, enabled_tool_names: list = None):
     logging.info("---Calling Model (OpenAI API direct)---")
     # Build OpenAI-compatible messages list
     system_prompt = (
