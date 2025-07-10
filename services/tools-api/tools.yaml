@@ -6,84 +6,82 @@ MCPO Servers:
 
 LangGraph-Tools:
   yt_tools:
-    - name: summarize_url
-      description: |
-        Summarize a YouTube video or local file using Whisper and an LLM.
-      parameters:
-        type: object
-        properties:
-          source:
-            type: string
-            description: |
-              The URL of the YouTube video or the path to a local file.
-        required:
-          - source
-      run: from yt_tools import summarize_url
-    - name: transcribe_url
-      description: |
-        Transcribe a YouTube video or local file using Whisper.
-      parameters:
-        type: object
-        properties:
-          source:
-            type: string
-            description: |
-              The URL of the YouTube video or the path to a local file.
-        required:
-          - source
-      run: from yt_tools import transcribe_url
-      no_think: true
+  - name: summarize_url
+    description: |
+      Summarize a YouTube video or local file using Whisper and an LLM.
+    parameters:
+      type: object
+      properties:
+        source:
+          type: string
+          description: |
+            The URL of the YouTube video or the path to a local file.
+      required:
+      - source
+    run: from yt_tools import summarize_url
+  - name: transcribe_url
+    description: |
+      Transcribe a YouTube video or local file using Whisper.
+    parameters:
+      type: object
+      properties:
+        source:
+          type: string
+          description: |
+            The URL of the YouTube video or the path to a local file.
+      required:
+      - source
+    run: from yt_tools import transcribe_url
   google_search:
-    - name: search
-      description: |
-        Performs a web search using Google's Programmable Search Engine.
-      parameters:
-        type: object
-        properties:
-          query:
-            type: string
-            description: |
-              The search query.
-          num:
-            type: integer
-            description: |
-              Number of search results to return. Valid values are integers between 1 and 10, inclusive.
-          dateRestrict:
-            type: string
-            description: |
-              Restricts results to URLs based on date. Supported values include: d[number], w[number], m[number], y[number].
-          exactTerms:
-            type: string
-            description: |
-              Identifies a phrase that all documents in the search results must contain.
-          excludeTerms:
-            type: string
-            description: |
-              Identifies a word or phrase that should not appear in any documents in the search results.
-          fileType:
-            type: string
-            description: |
-              Restricts results to files of a specified extension.
-          lr:
-            type: string
-            description: |
-              Restricts the search to documents written in a particular language (e.g., lr=lang_ja).
-          safe:
-            type: string
-            enum:
-              - "active"
-              - "off"
-            description: |
-              Search safety level.
-          siteSearch:
-            type: string
-            description: |
-              Specifies a given site which should always be included or excluded from results.
-          sort:
-            type: string
-            description: |
-              The sort expression to apply to the results (e.g., sort=date).
-        required:
-          - query
-      run: from google_search import search
-      no_think: true
+  - name: search
+    description: |
+      Performs a web search using Google's Programmable Search Engine.
+    parameters:
+      type: object
+      properties:
+        query:
+          type: string
+          description: |
+            The search query.
+        num:
+          type: integer
+          description: |
+            Number of search results to return. Valid values are integers between 1 and 10, inclusive.
+        dateRestrict:
+          type: string
+          description: |
+            Restricts results to URLs based on date. Supported values include: d[number], w[number], m[number], y[number].
+        exactTerms:
+          type: string
+          description: |
+            Identifies a phrase that all documents in the search results must contain.
+        excludeTerms:
+          type: string
+          description: |
+            Identifies a word or phrase that should not appear in any documents in the search results.
+        fileType:
+          type: string
+          description: |
+            Restricts results to files of a specified extension.
+        lr:
+          type: string
+          description: |
+            Restricts the search to documents written in a particular language (e.g., lr=lang_ja).
+        safe:
+          type: string
+          enum:
+          - "active"
+          - "off"
+          description: |
+            Search safety level.
+        siteSearch:
+          type: string
+          description: |
+            Specifies a given site which should always be included or excluded from results.
+        sort:
+          type: string
+          description: |
+            The sort expression to apply to the results (e.g., sort=date).
+      required:
+      - query
+    run: from google_search import search

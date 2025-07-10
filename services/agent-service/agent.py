@@ -84,9 +84,8 @@ logging.info(f"Formatted tools: {formatted_tools}")
 async def call_model(client: httpx.AsyncClient, state: dict, enabled_tool_names: list = None, use_thinking: bool = True):
     logging.info("---Calling Model (OpenAI API direct)---")
     # Build OpenAI-compatible messages list
-    think_flag = "/think" if use_thinking else "/no_think"
     system_prompt = (
-        f"You are a powerful and intelligent AI assistant. {think_flag}"
+        f"You are a powerful and intelligent AI assistant."
         "You have access to a variety of tools to help you answer user queries. "
         "Only use the provided tools if they are relevant to the user's query. "
         "If the tools are not relevant, you must answer the user's query directly without mentioning the tools."
